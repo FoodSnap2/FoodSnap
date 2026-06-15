@@ -41,7 +41,7 @@ if defined app.github_username set "CFG_GITHUB_LOGIN=%app.github_username%"
 
 echo.
 echo ============================================================
-echo  GitHub login / readiness check
+echo  GitHub login check
 echo ============================================================
 echo.
 echo Project:
@@ -101,22 +101,22 @@ echo.
 echo Expected GitHub login:
 echo   %CFG_GITHUB_LOGIN%
 echo.
-echo This script will not commit or push anything.
-echo It will only set/check local Git settings and optionally run a dry-run push.
+echo This script will not commit, push, pull, merge, or dry-run push.
+echo It only checks/starts GitHub login.
 echo.
 pause
+
+call :FindGitCredentialManager
 
 set "EXISTING_LOCAL_NAME="
 set "EXISTING_LOCAL_EMAIL="
 set "EXISTING_GLOBAL_NAME="
 set "EXISTING_GLOBAL_EMAIL="
-set "EXISTING_ORIGIN="
 set "CURRENT_BRANCH="
 
 if exist ".git" (
     for /f "delims=" %%A in ('git config --local --get user.name 2^>nul') do set "EXISTING_LOCAL_NAME=%%A"
     for /f "delims=" %%A in ('git config --local --get user.email 2^>nul') do set "EXISTING_LOCAL_EMAIL=%%A"
-    for /f "delims=" %%A in ('git remote get-url origin 2^>nul') do set "EXISTING_ORIGIN=%%A"
     for /f "delims=" %%A in ('git branch --show-current 2^>nul') do set "CURRENT_BRANCH=%%A"
 )
 
@@ -212,7 +212,7 @@ if not defined FINAL_EMAIL (
     echo.
     echo ERROR: Git email is required for commits.
     echo.
-    echo This does not need to be stored in build_config.bat.
+    echo It does not need to be stored in build_config.bat.
     echo It will be stored only in this repo's local .git config.
     echo.
     pause
@@ -237,19 +237,12 @@ if errorlevel 1 (
 
 echo.
 echo Checking Git Credential Manager...
-git credential-manager --version >nul 2>nul
-if not errorlevel 1 (
+if defined GCM_CMD (
     git config --global credential.helper manager
     echo Git Credential Manager configured.
 ) else (
-    git credential-manager-core --version >nul 2>nul
-    if not errorlevel 1 (
-        git config --global credential.helper manager-core
-        echo Git Credential Manager Core configured.
-    ) else (
-        echo WARNING: Git Credential Manager was not found.
-        echo Git may ask for username and token in the console.
-    )
+    echo WARNING: Git Credential Manager was not found.
+    echo Git may require username/token prompts later.
 )
 
 echo.
@@ -300,195 +293,135 @@ echo ------------------------------------------------------------
 echo.
 
 echo.
-echo Checking currently stored github.com credential without opening login...
-call :ShowCachedGithubCredential
+echo Checking currently stored GitHub login without opening browser...
+call :DetectGithubLogin
 
 echo.
-set "CLEAR_CREDS="
-set /p "CLEAR_CREDS=Clear cached github.com credentials? [y/N]: "
-
-if /I "%CLEAR_CREDS%"=="y" (
-    call :ForgetGithubCredentials
+echo GitHub login status:
+echo ------------------------------------------------------------
+if defined LOGIN_MATCH (
+    echo OK: You appear to be logged in as the expected GitHub account:
+    echo   %CFG_GITHUB_LOGIN%
     echo.
-    echo Rechecking currently stored github.com credential without opening login...
-    call :ShowCachedGithubCredential
+    echo No login is needed.
+    echo.
+    pause
+    exit /b 0
 )
 
-if defined AUTH_LOGIN (
-    if /I not "%AUTH_LOGIN%"=="%CFG_GITHUB_LOGIN%" (
-        echo.
-        echo WARNING: Cached GitHub username does not match expected login.
-        echo.
-        echo Expected:
-        echo   %CFG_GITHUB_LOGIN%
-        echo.
-        echo Found:
+if defined FOUND_GITHUB_CRED (
+    echo A GitHub credential appears to exist.
+    if defined AUTH_LOGIN (
+        echo Detected login:
         echo   %AUTH_LOGIN%
-        echo.
-        set "FORGET_WRONG="
-        set /p "FORGET_WRONG=Forget cached github.com credential now? [Y/n]: "
-
-        if /I not "!FORGET_WRONG!"=="n" (
-            call :ForgetGithubCredentials
-            echo.
-            echo Rechecking currently stored github.com credential without opening login...
-            call :ShowCachedGithubCredential
-        )
+    ) else (
+        echo The exact username could not be read without opening login.
     )
+    echo.
+    echo Expected login:
+    echo   %CFG_GITHUB_LOGIN%
+    echo.
+) else (
+    echo No stored GitHub credential was found.
+    echo.
+    echo Expected login:
+    echo   %CFG_GITHUB_LOGIN%
+    echo.
 )
+echo ------------------------------------------------------------
 
 echo.
-echo ============================================================
-echo  Optional GitHub network readiness check
-echo ============================================================
-echo.
-echo The next check may open a GitHub login window if no valid credential exists.
-echo It will not commit anything.
-echo It will not push anything.
-echo It will run:
-echo   git ls-remote
-echo   git push --dry-run
-echo.
-echo If GitHub opens a login window, complete it and wait.
-echo Do not close the login window after the browser says success.
-echo.
-set "RUN_NETWORK_CHECK="
-set /p "RUN_NETWORK_CHECK=Run GitHub login/readiness check now? [Y/n]: "
+set "START_LOGIN="
+set /p "START_LOGIN=Start GitHub login now? [Y/n]: "
 
-if /I "%RUN_NETWORK_CHECK%"=="n" (
+if /I "%START_LOGIN%"=="n" (
     echo.
-    echo Skipped GitHub network readiness check.
-    echo.
-    echo Local Git setup is complete, but GitHub login/write access was not verified.
-    echo.
-    pause
-    exit /b 0
-)
-
-echo.
-echo Checking read access to repo...
-git ls-remote "%CFG_REPO_URL%" HEAD >nul 2>nul
-if errorlevel 1 (
-    echo.
-    echo ERROR: Could not read from the GitHub repo.
-    echo.
-    echo Possible causes:
-    echo   wrong GitHub account
-    echo   repo URL is wrong
-    echo   repo is private and credentials are missing
-    echo   internet problem
-    echo   GitHub login was cancelled
+    echo Cancelled. No GitHub login was started.
     echo.
     pause
     exit /b 1
 )
 
-echo OK: Repo is reachable.
-
-git rev-parse --verify HEAD >nul 2>nul
-if errorlevel 1 (
+if defined FOUND_GITHUB_CRED (
     echo.
-    echo No local commits exist yet.
-    echo Skipping push dry-run because there is nothing to test.
-    echo.
-    echo Login/origin setup is ready.
-    echo.
-    pause
-    exit /b 0
+    set "CLEAR_FIRST="
+    set /p "CLEAR_FIRST=Clear existing github.com credentials first? [Y/n]: "
+    if /I not "!CLEAR_FIRST!"=="n" (
+        call :ForgetGithubCredentials
+    )
 )
 
 echo.
-echo Checking push readiness with dry-run only...
-echo This does not upload commits.
+echo Starting GitHub login...
+echo If a GitHub window opens, complete the login and wait for it to close by itself.
 echo.
 
-set "DRYRUN_LOG=%TEMP%\git-login-dryrun-%RANDOM%-%RANDOM%.txt"
-
-git push --dry-run origin "%CURRENT_BRANCH%" > "%DRYRUN_LOG%" 2>&1
-set "DRYRUN_RC=%ERRORLEVEL%"
-
-type "%DRYRUN_LOG%"
-
-findstr /I /C:"denied to" "%DRYRUN_LOG%" >nul 2>nul
-if not errorlevel 1 set "DRYRUN_PERMISSION_ERROR=1"
-
-findstr /I /C:"403" "%DRYRUN_LOG%" >nul 2>nul
-if not errorlevel 1 set "DRYRUN_PERMISSION_ERROR=1"
-
-findstr /I /C:"Authentication failed" "%DRYRUN_LOG%" >nul 2>nul
-if not errorlevel 1 set "DRYRUN_PERMISSION_ERROR=1"
-
-findstr /I /C:"User cancelled" "%DRYRUN_LOG%" >nul 2>nul
-if not errorlevel 1 set "DRYRUN_CANCELLED=1"
-
-findstr /I /C:"User canceled" "%DRYRUN_LOG%" >nul 2>nul
-if not errorlevel 1 set "DRYRUN_CANCELLED=1"
-
-findstr /I /C:"non-fast-forward" "%DRYRUN_LOG%" >nul 2>nul
-if not errorlevel 1 set "DRYRUN_HISTORY_ERROR=1"
-
-findstr /I /C:"fetch first" "%DRYRUN_LOG%" >nul 2>nul
-if not errorlevel 1 set "DRYRUN_HISTORY_ERROR=1"
-
-findstr /I /C:"rejected" "%DRYRUN_LOG%" >nul 2>nul
-if not errorlevel 1 set "DRYRUN_HISTORY_ERROR=1"
-
-del "%DRYRUN_LOG%" >nul 2>nul
-
-if not "%DRYRUN_RC%"=="0" (
+call :StartGithubLogin
+if errorlevel 1 (
     echo.
-    echo ERROR: Push dry-run failed.
-    echo.
-    echo This did not push anything.
-    echo.
-
-    if defined DRYRUN_CANCELLED (
-        echo GitHub login was cancelled.
-        echo Run this script again and complete the GitHub login window.
-        echo.
-        pause
-        exit /b 1
-    )
-
-    if defined DRYRUN_PERMISSION_ERROR (
-        echo GitHub permission/authentication failed.
-        echo The cached/login account may be wrong, or it may not have write access.
-        echo.
-        echo Expected account:
-        echo   %CFG_GITHUB_LOGIN%
-        echo.
-        pause
-        exit /b 1
-    )
-
-    if defined DRYRUN_HISTORY_ERROR (
-        echo GitHub login may be OK, but GitHub already has commits
-        echo that are not in this local repo.
-        echo.
-        echo Recommended next step:
-        echo   git fetch origin
-        echo   git merge origin/%CURRENT_BRANCH% --allow-unrelated-histories
-        echo.
-        echo If there are conflicts, stop and inspect them before pushing.
-        echo.
-        pause
-        exit /b 1
-    )
-
-    echo Unknown dry-run failure.
-    echo Inspect the message above.
+    echo ERROR: GitHub login command failed or was cancelled.
     echo.
     pause
     exit /b 1
 )
 
 echo.
-echo OK: GitHub login and push readiness check passed.
+echo Rechecking stored GitHub login...
+call :DetectGithubLogin
+
 echo.
-echo No commits were created.
-echo No commits were pushed.
+echo Final GitHub login status:
+echo ------------------------------------------------------------
+if defined LOGIN_MATCH (
+    echo OK: You appear to be logged in as:
+    echo   %CFG_GITHUB_LOGIN%
+    echo.
+    echo No commits were created.
+    echo Nothing was pushed.
+    echo.
+    pause
+    exit /b 0
+)
+
+if defined FOUND_GITHUB_CRED (
+    echo A GitHub credential now appears to exist.
+    if defined AUTH_LOGIN (
+        echo Detected login:
+        echo   %AUTH_LOGIN%
+    ) else (
+        echo The exact username could not be read without opening login.
+    )
+    echo.
+    echo Expected login:
+    echo   %CFG_GITHUB_LOGIN%
+    echo.
+    echo Login may be usable, but this script could not prove the account name.
+    echo No commits were created. Nothing was pushed.
+    echo.
+    pause
+    exit /b 0
+)
+
+echo No GitHub credential was found after login.
 echo.
 pause
+exit /b 1
+
+:FindGitCredentialManager
+set "GCM_CMD="
+
+git credential-manager --version >nul 2>nul
+if not errorlevel 1 (
+    set "GCM_CMD=git credential-manager"
+    exit /b 0
+)
+
+git credential-manager-core --version >nul 2>nul
+if not errorlevel 1 (
+    set "GCM_CMD=git credential-manager-core"
+    exit /b 0
+)
+
 exit /b 0
 
 :ParseRepoUrl
@@ -509,33 +442,52 @@ for /f "tokens=1,2 delims=/" %%A in ("%REPO_PATH%") do (
 if defined REPO_NAME set "REPO_NAME=%REPO_NAME:.git=%"
 exit /b 0
 
-:ShowCachedGithubCredential
-set "AUTH_LOGIN="
+:DetectGithubLogin
 set "FOUND_GITHUB_CRED="
+set "AUTH_LOGIN="
+set "LOGIN_MATCH="
+
+call :DetectGithubLoginWithGcm
+if defined LOGIN_MATCH exit /b 0
+
+call :DetectGithubLoginWithCmdkey
+if defined LOGIN_MATCH exit /b 0
+
+exit /b 0
+
+:DetectGithubLoginWithGcm
+if not defined GCM_CMD exit /b 0
+
+set "GCM_LIST_FILE=%TEMP%\git-login-gcm-list-%RANDOM%-%RANDOM%.txt"
+
+%GCM_CMD% github list > "%GCM_LIST_FILE%" 2>&1
+if errorlevel 1 (
+    del "%GCM_LIST_FILE%" >nul 2>nul
+    exit /b 0
+)
+
+findstr /I /C:"github.com" "%GCM_LIST_FILE%" >nul 2>nul
+if not errorlevel 1 set "FOUND_GITHUB_CRED=1"
+
+findstr /I /C:"%CFG_GITHUB_LOGIN%" "%GCM_LIST_FILE%" >nul 2>nul
+if not errorlevel 1 (
+    set "FOUND_GITHUB_CRED=1"
+    set "AUTH_LOGIN=%CFG_GITHUB_LOGIN%"
+    set "LOGIN_MATCH=1"
+)
+
+del "%GCM_LIST_FILE%" >nul 2>nul
+exit /b 0
+
+:DetectGithubLoginWithCmdkey
 set "CK_IN_GITHUB_BLOCK="
 
 for /f "tokens=* delims=" %%A in ('cmdkey /list 2^>nul') do call :InspectCmdkeyLine "%%A"
 
-if defined FOUND_GITHUB_CRED (
-    echo Cached github.com credential appears to exist.
-
-    if defined AUTH_LOGIN (
-        echo Cached username appears to be:
-        echo   %AUTH_LOGIN%
-    ) else (
-        echo Cached username could not be read from Windows Credential Manager.
-        echo This is normal for some Git Credential Manager versions.
-    )
-
-    echo.
-    echo Expected for this repo:
-    echo   %CFG_GITHUB_LOGIN%
-    exit /b 0
+if defined AUTH_LOGIN (
+    if /I "%AUTH_LOGIN%"=="%CFG_GITHUB_LOGIN%" set "LOGIN_MATCH=1"
 )
 
-echo No cached github.com credential was found without prompting login.
-echo Expected for this repo:
-echo   %CFG_GITHUB_LOGIN%
 exit /b 0
 
 :InspectCmdkeyLine
@@ -568,9 +520,34 @@ if defined CK_IN_GITHUB_BLOCK (
 
 exit /b 0
 
+:StartGithubLogin
+if defined GCM_CMD (
+    %GCM_CMD% github login
+    if not errorlevel 1 exit /b 0
+)
+
+echo.
+echo Git Credential Manager direct login was unavailable or failed.
+echo Trying fallback credential prompt...
+echo.
+
+set "CRED_IN=%TEMP%\git-login-cred-in-%RANDOM%-%RANDOM%.txt"
+
+> "%CRED_IN%" echo protocol=https
+>> "%CRED_IN%" echo host=github.com
+>> "%CRED_IN%" echo path=%REPO_OWNER%/%REPO_NAME%.git
+>> "%CRED_IN%" echo.
+
+git credential fill < "%CRED_IN%" >nul
+set "FILL_RC=%ERRORLEVEL%"
+
+del "%CRED_IN%" >nul 2>nul
+
+exit /b %FILL_RC%
+
 :ForgetGithubCredentials
 echo.
-echo Forgetting cached github.com credential...
+echo Forgetting cached github.com credentials...
 
 set "CRED_REJECT=%TEMP%\git-login-cred-reject-%RANDOM%-%RANDOM%.txt"
 
@@ -581,6 +558,10 @@ set "CRED_REJECT=%TEMP%\git-login-cred-reject-%RANDOM%-%RANDOM%.txt"
 git credential reject < "%CRED_REJECT%" >nul 2>nul
 
 del "%CRED_REJECT%" >nul 2>nul
+
+if defined GCM_CMD (
+    %GCM_CMD% github logout >nul 2>nul
+)
 
 cmdkey /delete:git:https://github.com >nul 2>nul
 cmdkey /delete:git:https://github.com/ >nul 2>nul
