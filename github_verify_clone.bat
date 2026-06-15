@@ -20,18 +20,6 @@ if defined app.repo_url set "CFG_REPO_URL=%app.repo_url%"
 if defined app.git_repo_url set "CFG_REPO_URL=%app.git_repo_url%"
 if defined app.github_url set "CFG_REPO_URL=%app.github_url%"
 
-set "SAFE_APP_NAME=%APP_NAME%"
-set "SAFE_APP_NAME=%SAFE_APP_NAME: =_%"
-set "SAFE_APP_NAME=%SAFE_APP_NAME:/=_%"
-set "SAFE_APP_NAME=%SAFE_APP_NAME:\=_%"
-set "SAFE_APP_NAME=%SAFE_APP_NAME::=_%"
-set "SAFE_APP_NAME=%SAFE_APP_NAME:*=_%"
-set "SAFE_APP_NAME=%SAFE_APP_NAME:?=_%"
-set "SAFE_APP_NAME=%SAFE_APP_NAME:"=_%"
-set "SAFE_APP_NAME=%SAFE_APP_NAME:<=_%"
-set "SAFE_APP_NAME=%SAFE_APP_NAME:>=_%"
-set "SAFE_APP_NAME=%SAFE_APP_NAME:|=_%"
-
 echo.
 echo ============================================================
 echo  Verify GitHub clone
@@ -53,9 +41,11 @@ if errorlevel 1 (
 )
 
 set "REMOTE_URL="
+set "LOCAL_HEAD="
 
 if exist ".git" (
     for /f "delims=" %%A in ('git remote get-url origin 2^>nul') do set "REMOTE_URL=%%A"
+    for /f "delims=" %%A in ('git rev-parse HEAD 2^>nul') do set "LOCAL_HEAD=%%A"
 )
 
 if not defined REMOTE_URL if defined CFG_REPO_URL set "REMOTE_URL=%CFG_REPO_URL%"
@@ -73,7 +63,7 @@ if not defined REMOTE_URL (
     exit /b 1
 )
 
-set "TEST_DIR=%TEMP%\%SAFE_APP_NAME%-verify-clone-%RANDOM%-%RANDOM%"
+set "TEST_DIR=%TEMP%\github-verify-clone-%RANDOM%-%RANDOM%"
 
 echo Remote URL:
 echo   %REMOTE_URL%
@@ -97,6 +87,7 @@ if errorlevel 1 (
     echo   wrong repo URL
     echo   repo is private and credentials are missing
     echo   internet problem
+    echo   nothing has been pushed yet
     echo.
     pause
     exit /b 1
@@ -105,6 +96,51 @@ if errorlevel 1 (
 echo.
 echo Test clone succeeded.
 echo.
+
+if defined LOCAL_HEAD (
+    set "CLONE_HEAD="
+    for /f "delims=" %%A in ('git -C "%TEST_DIR%" rev-parse HEAD 2^>nul') do set "CLONE_HEAD=%%A"
+
+    if not defined CLONE_HEAD (
+        echo ERROR: GitHub cloned, but the remote repo has no commits yet.
+        echo.
+        echo Your local repo has a commit, but it has not been pushed.
+        echo.
+        echo Run:
+        echo   just_push.bat
+        echo.
+        echo Removing test clone...
+        rmdir /S /Q "%TEST_DIR%" >nul 2>nul
+        echo.
+        pause
+        exit /b 1
+    )
+
+    if /I not "!CLONE_HEAD!"=="!LOCAL_HEAD!" (
+        echo ERROR: GitHub clone does not match your local commit.
+        echo.
+        echo Local HEAD:
+        echo   !LOCAL_HEAD!
+        echo.
+        echo GitHub HEAD:
+        echo   !CLONE_HEAD!
+        echo.
+        echo This usually means your latest commit has not been pushed yet.
+        echo.
+        echo Run:
+        echo   just_push.bat
+        echo.
+        echo Removing test clone...
+        rmdir /S /Q "%TEST_DIR%" >nul 2>nul
+        echo.
+        pause
+        exit /b 1
+    )
+
+    echo GitHub HEAD matches local HEAD:
+    echo   !LOCAL_HEAD!
+    echo.
+)
 
 echo Cloned folder contents:
 dir "%TEST_DIR%"
