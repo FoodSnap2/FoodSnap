@@ -1,4 +1,10 @@
 @echo off
+if defined app.bootstrap.fullpath goto :setup
+set "app.bootstrap.fullpath=1"
+call "%~f0" %*
+set "app.rc=%errorlevel%"
+set "app.bootstrap.fullpath="
+exit /b %app.rc%
 :setup
 :: ============================================================
 :: bootstrap.bat
@@ -23,7 +29,7 @@
 :: ============================================================
 cd /d "%~dp0"
 set "app.rc=0"
-set "app.version=bootstrap14"
+set "app.version=bootstrap15"
 set "app.root=%CD%"
 set "app.timestamp="
 set "app.log.dir=%app.root%\bootstrap_logs"
