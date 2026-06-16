@@ -23,7 +23,7 @@
 :: ============================================================
 cd /d "%~dp0"
 set "app.rc=0"
-set "app.version=bootstrap9"
+set "app.version=bootstrap10"
 set "app.root=%CD%"
 set "app.timestamp="
 set "app.log.dir=%app.root%\bootstrap_logs"
@@ -297,9 +297,20 @@ exit /b 0
 set "app.auto=1"
 set "app.mode=auto"
 set "app.move.mode=documents"
-call :Yellow AUTO: clone/update, login prompt, fork if needed, move to Documents, build.
-call :RunBootstrapWorkflow
-exit /b %errorlevel%
+call :Yellow AUTO: Git, clone/update, optional login, fork if needed, move to Documents, build.
+call :EnsureGit
+if errorlevel 1 exit /b %errorlevel%
+call :CloneOrUpdateRepo
+if errorlevel 1 exit /b %errorlevel%
+call :MaybeLoginAndFork
+if errorlevel 1 exit /b %errorlevel%
+call :MoveProjectToDocuments
+if errorlevel 1 exit /b %errorlevel%
+call :RunBuildStep
+if errorlevel 1 exit /b %errorlevel%
+call :Green OK: Auto bootstrap complete.
+call :Green DIR: %app.folder%
+exit /b 0
 
 :: ============================================================
 :: Function: RunBootstrapWorkflow
@@ -310,11 +321,16 @@ exit /b %errorlevel%
 ::   nonzero failure
 :: ============================================================
 :RunBootstrapWorkflow
-call :EnsureGit || exit /b %errorlevel%
-call :CloneOrUpdateRepo || exit /b %errorlevel%
-call :MaybeLoginAndFork || exit /b %errorlevel%
-call :MaybeMoveProject || exit /b %errorlevel%
-if defined app.auto call :RunBuildStep || exit /b %errorlevel%
+call :EnsureGit
+if errorlevel 1 exit /b %errorlevel%
+call :CloneOrUpdateRepo
+if errorlevel 1 exit /b %errorlevel%
+call :MaybeLoginAndFork
+if errorlevel 1 exit /b %errorlevel%
+call :MaybeMoveProject
+if errorlevel 1 exit /b %errorlevel%
+if defined app.auto call :RunBuildStep
+if errorlevel 1 exit /b %errorlevel%
 call :Green OK: Bootstrap complete.
 call :Green DIR: %app.folder%
 exit /b 0
@@ -328,15 +344,16 @@ exit /b 0
 ::   4 Git install failed
 :: ============================================================
 :EnsureGit
-call :ResolveGit
-if defined app.git (call :Green OK: Found Git: %app.git% & exit /b 0)
+call :FindGitExe
+if defined app.git (call :AddGitToPath & call :Green OK: Found Git: %app.git% & exit /b 0)
 call :Yellow MISS: git.exe not found.
 call :EnsureGetGitHelper || exit /b 4
 call :Yellow DO: Installing Git using tools\GetGit.bat.
 call "%app.tools%\GetGit.bat" >> "%app.log%" 2>&1
 if errorlevel 1 (call :Red FAIL: GetGit.bat failed. & call :Yellow LOG: %app.log% & exit /b 4)
-call :ResolveGit
+call :FindGitExe
 if not defined app.git (call :Red FAIL: Git is still missing after GetGit.bat. & call :Yellow LOG: %app.log% & exit /b 4)
+call :AddGitToPath
 call :Green OK: Git ready: %app.git%
 exit /b 0
 
@@ -348,10 +365,37 @@ exit /b 0
 ::   0 always
 :: ============================================================
 :ResolveGit
+call :FindGitExe
+exit /b 0
+
+:: ============================================================
+:: Function: FindGitExe
+:: Usage: call :FindGitExe
+:: Purpose: resolves local or PATH git.exe into app.git.
+:: Returns:
+::   0 always
+:: ============================================================
+:FindGitExe
 set "app.git="
 if exist "%app.tools%\git\cmd\git.exe" for %%A in ("%app.tools%\git\cmd\git.exe") do set "app.git=%%~fA"
 if not defined app.git if exist "%app.folder%\tools\git\cmd\git.exe" for %%A in ("%app.folder%\tools\git\cmd\git.exe") do set "app.git=%%~fA"
 if not defined app.git for %%P in (git.exe) do set "app.git=%%~$PATH:P"
+exit /b 0
+
+:: ============================================================
+:: Function: AddGitToPath
+:: Usage: call :AddGitToPath
+:: Purpose: prepends resolved git.exe folder to PATH so gh can find Git.
+:: Returns:
+::   0 always
+:: ============================================================
+:AddGitToPath
+if not defined app.git exit /b 0
+for %%A in ("%app.git%") do set "agtp_dir=%%~dpA"
+if not defined agtp_dir exit /b 0
+echo ;%PATH%;| find /I ";%agtp_dir%;" >nul 2>nul
+if errorlevel 1 set "PATH=%agtp_dir%;%PATH%"
+set "agtp_dir="
 exit /b 0
 
 :: ============================================================
@@ -382,7 +426,10 @@ exit /b 4
 :: ============================================================
 :CloneOrUpdateRepo
 if exist "%app.folder%\.git\" goto :CloneOrUpdateRepoUpdate
-if exist "%app.folder%\" (call :Red FAIL: target folder exists but is not a Git checkout: %app.folder% & exit /b 5)
+if not exist "%app.folder%\" goto :CloneOrUpdateRepoClone
+call :QuarantineNonGitFolder
+if errorlevel 1 exit /b 5
+:CloneOrUpdateRepoClone
 call :Yellow DO: Cloning %app.repo.url%.
 "%app.git%" clone --branch "%app.repo.branch%" "%app.repo.url%" "%app.folder%" >> "%app.log%" 2>&1
 if errorlevel 1 (call :Red FAIL: git clone failed. & call :Yellow LOG: %app.log% & exit /b 5)
@@ -402,6 +449,23 @@ call :Green OK: Repo ready.
 exit /b 0
 
 :: ============================================================
+:: Function: QuarantineNonGitFolder
+:: Usage: call :QuarantineNonGitFolder
+:: Purpose: moves an existing non-Git target folder aside before cloning.
+:: Returns:
+::   0 folder moved/clear
+::   5 folder could not be moved
+:: ============================================================
+:QuarantineNonGitFolder
+set "qngf_old=%app.folder%.notgit.%app.timestamp%"
+call :Yellow WARN: target folder exists but is not a Git checkout: %app.folder%
+call :Yellow DO: Moving stale folder to %qngf_old%.
+move "%app.folder%" "%qngf_old%" >> "%app.log%" 2>&1
+if errorlevel 1 (call :Red FAIL: could not move stale folder. & call :Yellow LOG: %app.log% & set "qngf_old=" & exit /b 5)
+set "qngf_old="
+exit /b 0
+
+:: ============================================================
 :: Function: MaybeLoginAndFork
 :: Usage: call :MaybeLoginAndFork
 :: Purpose: for GitHub repos, logs in and forks only when user lacks write access.
@@ -414,9 +478,12 @@ if not "%app.repo.github%"=="1" exit /b 0
 if /I "%app.login.mode%"=="none" (call :Yellow SKIP: GitHub login and fork steps skipped. & exit /b 0)
 call :MaybePromptLoginSkip
 if /I "%app.login.mode%"=="none" (call :Yellow SKIP: GitHub login and fork steps skipped. & exit /b 0)
-call :EnsureGitHubCLI || exit /b %errorlevel%
-call :EnsureGitHubLogin || exit /b %errorlevel%
-call :MaybeForkRepo || exit /b %errorlevel%
+call :EnsureGitHubCLI
+if errorlevel 1 exit /b %errorlevel%
+call :EnsureGitHubLogin
+if errorlevel 1 exit /b %errorlevel%
+call :MaybeForkRepo
+if errorlevel 1 exit /b %errorlevel%
 exit /b 0
 
 :: ============================================================
@@ -430,7 +497,7 @@ exit /b 0
 if not defined app.auto exit /b 0
 call :Yellow GitHub login is optional. Press Enter to login, or type nologin to skip.
 set "mpls_choice="
-set /p "mpls_choice=GitHub login: "
+set /p "mpls_choice=Login choice: "
 if /I "%mpls_choice%"=="nologin" set "app.login.mode=none"
 set "mpls_choice="
 exit /b 0
@@ -444,7 +511,7 @@ exit /b 0
 ::   6 gh install failed
 :: ============================================================
 :EnsureGitHubCLI
-call :ResolveGitHubCLI
+call :FindGitHubCliExe
 if defined app.gh (call :Green OK: Found GitHub CLI: %app.gh% & exit /b 0)
 if not exist "%app.folder%\tools\GetGitCLI.bat" call :DownloadRepoGetGitCLI
 if not exist "%app.folder%\tools\GetGitCLI.bat" (call :Red FAIL: tools\GetGitCLI.bat was not found. & exit /b 6)
@@ -455,7 +522,7 @@ set "egc_rc=%errorlevel%"
 popd >nul
 if not "%egc_rc%"=="0" (call :Red FAIL: GetGitCLI.bat failed. & call :Yellow LOG: %app.log% & set "egc_rc=" & exit /b 6)
 set "egc_rc="
-call :ResolveGitHubCLI
+call :FindGitHubCliExe
 if not defined app.gh (call :Red FAIL: gh.exe is still missing after GetGitCLI.bat. & exit /b 6)
 call :Green OK: GitHub CLI ready: %app.gh%
 exit /b 0
@@ -468,6 +535,17 @@ exit /b 0
 ::   0 always
 :: ============================================================
 :ResolveGitHubCLI
+call :FindGitHubCliExe
+exit /b 0
+
+:: ============================================================
+:: Function: FindGitHubCliExe
+:: Usage: call :FindGitHubCliExe
+:: Purpose: resolves local or PATH gh.exe into app.gh.
+:: Returns:
+::   0 always
+:: ============================================================
+:FindGitHubCliExe
 set "app.gh="
 if exist "%app.folder%\tools\gh\bin\gh.exe" for %%A in ("%app.folder%\tools\gh\bin\gh.exe") do set "app.gh=%%~fA"
 if not defined app.gh if exist "%app.tools%\gh\bin\gh.exe" for %%A in ("%app.tools%\gh\bin\gh.exe") do set "app.gh=%%~fA"
@@ -497,12 +575,16 @@ exit /b 0
 ::   6 login failed
 :: ============================================================
 :EnsureGitHubLogin
+call :AddGitToPath
 "%app.gh%" auth status >> "%app.log%" 2>&1
 if not errorlevel 1 (call :Green OK: GitHub login ready. & exit /b 0)
 call :Yellow DO: GitHub login.
 "%app.gh%" auth login --web --git-protocol https
 if errorlevel 1 (call :Red FAIL: GitHub login failed. & exit /b 6)
 "%app.gh%" auth setup-git >> "%app.log%" 2>&1
+if errorlevel 1 call :Yellow WARN: gh auth setup-git failed; continuing because login may still be valid.
+"%app.gh%" auth status >> "%app.log%" 2>&1
+if errorlevel 1 (call :Red FAIL: GitHub login was not confirmed. & call :Yellow LOG: %app.log% & exit /b 6)
 call :Green OK: GitHub login ready.
 exit /b 0
 
@@ -520,10 +602,12 @@ for /f "delims=" %%A in ('"%app.gh%" repo view "%app.repo.owner%/%app.repo.name%
 if /I "%mfr_perm%"=="ADMIN" (call :Green OK: You can push to original repo. & set "mfr_perm=" & exit /b 0)
 if /I "%mfr_perm%"=="MAINTAIN" (call :Green OK: You can push to original repo. & set "mfr_perm=" & exit /b 0)
 if /I "%mfr_perm%"=="WRITE" (call :Green OK: You can push to original repo. & set "mfr_perm=" & exit /b 0)
-call :Yellow MISS: You do not appear to have write access to %app.repo.owner%/%app.repo.name%.
+if not defined mfr_perm call :Yellow WARN: could not confirm write access to %app.repo.owner%/%app.repo.name%.
+if defined mfr_perm call :Yellow MISS: You do not appear to have write access to %app.repo.owner%/%app.repo.name%.
 if /I "%app.fork.mode%"=="no" (call :Yellow SKIP: fork not created. & set "mfr_perm=" & exit /b 0)
 if not defined app.auto if /I "%app.fork.mode%"=="ask" call :AskForkChoice
 if /I "%app.fork.mode%"=="no" (set "mfr_perm=" & exit /b 0)
+if defined app.auto call :Yellow AUTO: creating/configuring fork because original repo is not writable.
 call :CreateAndConfigureFork
 set "mfr_rc=%errorlevel%"
 set "mfr_perm="
@@ -661,7 +745,15 @@ exit /b 0
 :: ============================================================
 :RunBuildStep
 if not exist "%app.folder%\prepare.bat" call :Yellow SKIP: prepare.bat not found.
-if exist "%app.folder%\prepare.bat" (call :Yellow DO: Running prepare.bat. & pushd "%app.folder%" >nul & call prepare.bat >> "%app.log%" 2>&1 & set "rbs_rc=%errorlevel%" & popd >nul & if not "%rbs_rc%"=="0" (call :Red FAIL: prepare.bat failed. & set "rbs_rc=" & exit /b 8))
+if not exist "%app.folder%\prepare.bat" goto :RunBuildStepBuild
+call :Yellow DO: Running prepare.bat.
+pushd "%app.folder%" >nul
+call prepare.bat >> "%app.log%" 2>&1
+set "rbs_rc=%errorlevel%"
+popd >nul
+if not "%rbs_rc%"=="0" (call :Red FAIL: prepare.bat failed. & call :Yellow LOG: %app.log% & set "rbs_rc=" & exit /b 8)
+set "rbs_rc="
+:RunBuildStepBuild
 if not exist "%app.folder%\build.bat" (call :Yellow SKIP: build.bat not found. & exit /b 0)
 call :Yellow DO: Running build.bat.
 pushd "%app.folder%" >nul
