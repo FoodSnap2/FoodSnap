@@ -25,7 +25,7 @@
 :: ============================================================
 cd /d "%~dp0"
 set "app.rc=0"
-set "app.version=bootstrap20"
+set "app.version=bootstrap21"
 set "app.root=%CD%"
 set "app.timestamp="
 set "app.log.dir=%app.root%\bootstrap_logs"
@@ -537,8 +537,9 @@ call :EnsureGit
 set "mlaf_rc=%errorlevel%"
 if not "%mlaf_rc%"=="0" exit /b %mlaf_rc%
 call :FindGitHubCliExe
-if defined app.gh call :IsGitHubLoggedIn
-if defined app.gh if not errorlevel 1 goto :MaybeLoginAndForkReady
+call :ValidateGitHubCliPath
+if not errorlevel 1 call :IsGitHubLoggedIn
+if not errorlevel 1 if defined app.gh goto :MaybeLoginAndForkReady
 call :MaybePromptLoginSkip
 set "mlaf_rc=%errorlevel%"
 if not "%mlaf_rc%"=="0" exit /b %mlaf_rc%
@@ -598,7 +599,8 @@ exit /b 0
 :EnsureGitHubCLI
 call :AddGitToPath
 call :FindGitHubCliExe
-if defined app.gh (call :Green OK: Found GitHub CLI: %app.gh% & exit /b 0)
+call :ValidateGitHubCliPath
+if not errorlevel 1 (call :Green OK: Found GitHub CLI: %app.gh% & exit /b 0)
 if not exist "%app.folder%\tools\GetGitCLI.bat" call :DownloadRepoGetGitCLI
 if not exist "%app.folder%\tools\GetGitCLI.bat" (call :Red FAIL: tools\GetGitCLI.bat was not found. & exit /b 6)
 call :Yellow DO: Installing GitHub CLI using tools\GetGitCLI.bat.
@@ -610,7 +612,8 @@ cd /d "%app.root%" >nul 2>&1
 if not "%egc_rc%"=="0" (call :Red FAIL: GetGitCLI.bat failed. & call :Yellow LOG: %app.log% & set "egc_rc=" & exit /b 6)
 set "egc_rc="
 call :FindGitHubCliExe
-if not defined app.gh (call :Red FAIL: gh.exe is still missing after GetGitCLI.bat. & call :Yellow LOG: %app.log% & exit /b 6)
+call :ValidateGitHubCliPath
+if errorlevel 1 (call :Red FAIL: gh.exe is still missing after GetGitCLI.bat. & call :Yellow LOG: %app.log% & exit /b 6)
 call :Green OK: GitHub CLI ready: %app.gh%
 exit /b 0
 
@@ -639,7 +642,23 @@ set "app.gh="
 if exist "%app.folder%\tools\gh\bin\gh.exe" for %%A in ("%app.folder%\tools\gh\bin\gh.exe") do set "app.gh=%%~fA"
 if not defined app.gh if exist "%app.tools%\gh\bin\gh.exe" for %%A in ("%app.tools%\gh\bin\gh.exe") do set "app.gh=%%~fA"
 if not defined app.gh for %%P in (gh.exe) do set "app.gh=%%~$PATH:P"
+call :ValidateGitHubCliPath >nul 2>&1
 exit /b 0
+
+:: ============================================================
+:: Function: ValidateGitHubCliPath
+:: Usage: call :ValidateGitHubCliPath
+:: Purpose: clears app.gh when it is empty, quoted-empty, or not an existing file.
+:: Returns:
+::   0 app.gh points to an existing gh.exe
+::   1 app.gh is invalid
+
+:: ============================================================
+:ValidateGitHubCliPath
+if not defined app.gh exit /b 1
+if exist "%app.gh%" exit /b 0
+set "app.gh="
+exit /b 1
 
 :: ============================================================
 :: Function: AddGitHubCliToPath
@@ -687,8 +706,11 @@ exit /b 0
 
 :: ============================================================
 :EnsureGitHubLogin
-if not defined app.gh (call :Red FAIL: gh.exe is not ready. & exit /b 6)
+if not defined app.gh call :EnsureGitHubCLI
+call :ValidateGitHubCliPath
+if errorlevel 1 (call :Red FAIL: gh.exe is not ready. & exit /b 6)
 call :AddGitToPath
+call :AddGitHubCliToPath
 call :IsGitHubLoggedIn
 if not errorlevel 1 (call :Green OK: GitHub login ready: %app.github.user% & exit /b 0)
 call :ConfigureGitCredentialHelper
@@ -971,12 +993,13 @@ if not defined app.repo.name (call :Red FAIL: repo name is unknown; cannot move 
 if not exist "%app.folder%\" (call :Red FAIL: project folder does not exist: %app.folder% & set "mptcf_parent=" & exit /b 7)
 for %%A in ("%mptcf_parent%\%app.repo.name%") do set "app.final.folder=%%~fA"
 if not defined app.final.folder (call :Red FAIL: destination could not be resolved. & set "mptcf_parent=" & exit /b 7)
-if /I "%app.final.folder%"=="%app.folder%" (call :Green OK: Project already in destination. & set "mptcf_parent=" & exit /b 0)
-if exist "%app.final.folder%\" (call :Yellow WARN: destination already exists: %app.final.folder% & set "app.folder=%app.final.folder%" & set "mptcf_parent=" & exit /b 0)
+if /I "%app.final.folder%"=="%app.folder%" (cd /d "%app.folder%" >nul 2>&1 & call :Green OK: Project already in destination. & set "mptcf_parent=" & exit /b 0)
+if exist "%app.final.folder%\" (call :Yellow WARN: destination already exists: %app.final.folder% & set "app.folder=%app.final.folder%" & cd /d "%app.folder%" >nul 2>&1 & set "mptcf_parent=" & exit /b 0)
 call :Yellow DO: Moving project to %app.final.folder%.
 robocopy "%app.folder%" "%app.final.folder%" /E /MOVE >> "%app.log%" 2>&1
 if errorlevel 8 (call :Red FAIL: project move failed. & call :Yellow LOG: %app.log% & set "mptcf_parent=" & exit /b 7)
 set "app.folder=%app.final.folder%"
+cd /d "%app.folder%" >nul 2>&1
 call :Green OK: Project moved to %app.folder%.
 set "mptcf_parent="
 exit /b 0
