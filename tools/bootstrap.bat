@@ -25,7 +25,7 @@
 :: ============================================================
 cd /d "%~dp0"
 set "app.rc=0"
-set "app.version=bootstrap19"
+set "app.version=bootstrap20"
 set "app.root=%CD%"
 set "app.timestamp="
 set "app.log.dir=%app.root%\bootstrap_logs"
@@ -108,7 +108,8 @@ exit /b %app.rc%
 call :SetESC app.esc
 if errorlevel 1 set "app.esc="
 if /I "%app.esc%"=="rem" set "app.esc="
-call :MakeTimestamp || exit /b 1
+call :MakeTimestamp
+if errorlevel 1 exit /b 1
 if not exist "%app.log.dir%\" mkdir "%app.log.dir%" >nul 2>&1
 set "app.log=%app.log.dir%\bootstrap.%app.timestamp%.log"
 break > "%app.log%"
@@ -321,7 +322,7 @@ exit /b 0
 set "app.auto=1"
 set "app.mode=auto"
 set "app.move.mode=documents"
-call :Yellow AUTO: Git, clone/update, login only if needed, fork if needed, move to Documents, build.
+call :Yellow AUTO: Git, clone/update, optional login, optional fork, move to Documents, prepare, build.
 call :EnsureGit
 set "raw_rc=%errorlevel%"
 if not "%raw_rc%"=="0" exit /b %raw_rc%
@@ -332,6 +333,9 @@ call :MaybeLoginAndFork
 set "raw_rc=%errorlevel%"
 if not "%raw_rc%"=="0" exit /b %raw_rc%
 call :MoveProjectToDocuments
+set "raw_rc=%errorlevel%"
+if not "%raw_rc%"=="0" exit /b %raw_rc%
+call :RunPrepareStep
 set "raw_rc=%errorlevel%"
 if not "%raw_rc%"=="0" exit /b %raw_rc%
 call :RunBuildStep
@@ -382,7 +386,8 @@ exit /b 0
 call :FindGitExe
 if defined app.git (call :AddGitToPath & call :Green OK: Found Git: %app.git% & exit /b 0)
 call :Yellow MISS: git.exe not found.
-call :EnsureGetGitHelper || exit /b 4
+call :EnsureGetGitHelper
+if errorlevel 1 exit /b 4
 call :Yellow DO: Installing Git using tools\GetGit.bat.
 cmd.exe /D /C call "%app.tools%\GetGit.bat" >> "%app.log%" 2>&1
 set "eg_rc=%errorlevel%"
@@ -453,7 +458,11 @@ if exist "%app.tools%\GetGit.bat" exit /b 0
 if not exist "%app.tools%\" mkdir "%app.tools%" >nul 2>&1
 if not defined app.getgit.url (call :Red FAIL: GetGit.bat URL is unknown. & exit /b 4)
 call :Yellow GET: %app.getgit.url%
-call :DownloadFile "%app.getgit.url%" "%app.tools%\GetGit.bat" || exit /b 4
+if exist "%app.tools%\GetGit.bat" del /Q "%app.tools%\GetGit.bat" >nul 2>&1
+where curl.exe >nul 2>nul
+if not errorlevel 1 curl.exe -L --fail --retry 3 -o "%app.tools%\GetGit.bat" "%app.getgit.url%" >> "%app.log%" 2>&1
+if exist "%app.tools%\GetGit.bat" exit /b 0
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$ProgressPreference='SilentlyContinue'; Invoke-WebRequest -Uri '%app.getgit.url%' -OutFile '%app.tools%\GetGit.bat'" >> "%app.log%" 2>&1
 if exist "%app.tools%\GetGit.bat" exit /b 0
 call :Red FAIL: GetGit.bat was not downloaded.
 exit /b 4
@@ -661,7 +670,11 @@ exit /b 0
 if not defined app.getgh.url exit /b 0
 if not exist "%app.folder%\tools\" mkdir "%app.folder%\tools" >nul 2>&1
 call :Yellow GET: %app.getgh.url%
-call :DownloadFile "%app.getgh.url%" "%app.folder%\tools\GetGitCLI.bat"
+if exist "%app.folder%\tools\GetGitCLI.bat" del /Q "%app.folder%\tools\GetGitCLI.bat" >nul 2>&1
+where curl.exe >nul 2>nul
+if not errorlevel 1 curl.exe -L --fail --retry 3 -o "%app.folder%\tools\GetGitCLI.bat" "%app.getgh.url%" >> "%app.log%" 2>&1
+if exist "%app.folder%\tools\GetGitCLI.bat" exit /b 0
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$ProgressPreference='SilentlyContinue'; Invoke-WebRequest -Uri '%app.getgh.url%' -OutFile '%app.folder%\tools\GetGitCLI.bat'" >> "%app.log%" 2>&1
 exit /b 0
 
 :: ============================================================
@@ -776,6 +789,7 @@ exit /b 0
 :MaybeForkRepo
 if not defined app.github.user call :GetGitHubUser
 if errorlevel 1 (call :Red FAIL: could not determine GitHub user; fork step cannot continue. & exit /b 6)
+for /f "tokens=* delims= " %%A in ("%app.github.user%") do set "app.github.user=%%A"
 if /I "%app.github.user%"=="%app.repo.owner%" (call :Green OK: Logged in as repo owner; original repo is writable. & exit /b 0)
 set "mfr_perm="
 for /f "usebackq delims=" %%A in (`"%app.gh%" repo view "%app.repo.owner%/%app.repo.name%" --json viewerPermission --jq ".viewerPermission" 2^>nul`) do set "mfr_perm=%%A"
@@ -852,8 +866,12 @@ pushd "%app.folder%" >nul
 "%app.git%" remote get-url upstream >nul 2>&1
 if errorlevel 1 call :MoveOriginToUpstream
 "%app.git%" remote get-url origin >nul 2>&1
-if not errorlevel 1 "%app.git%" remote remove origin >> "%app.log%" 2>&1
+if errorlevel 1 goto :CreateAndConfigureForkAddOrigin
+"%app.git%" remote set-url origin "https://github.com/%app.github.user%/%app.repo.name%.git" >> "%app.log%" 2>&1
+goto :CreateAndConfigureForkFetchOrigin
+:CreateAndConfigureForkAddOrigin
 "%app.git%" remote add origin "https://github.com/%app.github.user%/%app.repo.name%.git" >> "%app.log%" 2>&1
+:CreateAndConfigureForkFetchOrigin
 if errorlevel 1 (popd & cd /d "%app.root%" >nul 2>&1 & call :Red FAIL: could not configure fork remote. & exit /b 6)
 "%app.git%" fetch origin >> "%app.log%" 2>&1
 popd >nul 2>&1
