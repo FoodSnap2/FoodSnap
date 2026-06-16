@@ -23,7 +23,7 @@
 :: ============================================================
 cd /d "%~dp0"
 set "app.rc=0"
-set "app.version=bootstrap10"
+set "app.version=bootstrap11"
 set "app.root=%CD%"
 set "app.timestamp="
 set "app.log.dir=%app.root%\bootstrap_logs"
@@ -42,6 +42,7 @@ set "app.final.folder="
 set "app.tools=%app.root%\tools"
 set "app.git="
 set "app.gh="
+set "app.github.user="
 set "app.mode=default"
 set "app.help="
 set "app.auto="
@@ -297,7 +298,7 @@ exit /b 0
 set "app.auto=1"
 set "app.mode=auto"
 set "app.move.mode=documents"
-call :Yellow AUTO: Git, clone/update, optional login, fork if needed, move to Documents, build.
+call :Yellow AUTO: Git, clone/update, verified optional login, fork if needed, move to Documents, build.
 call :EnsureGit
 if errorlevel 1 exit /b %errorlevel%
 call :CloneOrUpdateRepo
@@ -350,7 +351,10 @@ call :Yellow MISS: git.exe not found.
 call :EnsureGetGitHelper || exit /b 4
 call :Yellow DO: Installing Git using tools\GetGit.bat.
 call "%app.tools%\GetGit.bat" >> "%app.log%" 2>&1
-if errorlevel 1 (call :Red FAIL: GetGit.bat failed. & call :Yellow LOG: %app.log% & exit /b 4)
+set "eg_rc=%errorlevel%"
+cd /d "%app.root%" >nul 2>&1
+if not "%eg_rc%"=="0" (call :Red FAIL: GetGit.bat failed. & call :Yellow LOG: %app.log% & set "eg_rc=" & exit /b 4)
+set "eg_rc="
 call :FindGitExe
 if not defined app.git (call :Red FAIL: Git is still missing after GetGit.bat. & call :Yellow LOG: %app.log% & exit /b 4)
 call :AddGitToPath
@@ -478,6 +482,8 @@ if not "%app.repo.github%"=="1" exit /b 0
 if /I "%app.login.mode%"=="none" (call :Yellow SKIP: GitHub login and fork steps skipped. & exit /b 0)
 call :MaybePromptLoginSkip
 if /I "%app.login.mode%"=="none" (call :Yellow SKIP: GitHub login and fork steps skipped. & exit /b 0)
+call :EnsureGit
+if errorlevel 1 exit /b %errorlevel%
 call :EnsureGitHubCLI
 if errorlevel 1 exit /b %errorlevel%
 call :EnsureGitHubLogin
@@ -495,10 +501,13 @@ exit /b 0
 :: ============================================================
 :MaybePromptLoginSkip
 if not defined app.auto exit /b 0
-call :Yellow GitHub login is optional. Press Enter to login, or type nologin to skip.
+call :Yellow GitHub login is optional.
+call :Yellow Press Enter to open the GitHub browser login, or type nologin to skip.
+call :Yellow Do not type your email or password here; gh will handle login safely.
 set "mpls_choice="
-set /p "mpls_choice=Login choice: "
+set /p "mpls_choice=Login choice [Enter/nologin]: "
 if /I "%mpls_choice%"=="nologin" set "app.login.mode=none"
+if defined mpls_choice if not /I "%mpls_choice%"=="nologin" call :Yellow NOTE: input ignored; continuing with GitHub browser login.
 set "mpls_choice="
 exit /b 0
 
@@ -511,19 +520,22 @@ exit /b 0
 ::   6 gh install failed
 :: ============================================================
 :EnsureGitHubCLI
+call :AddGitToPath
 call :FindGitHubCliExe
-if defined app.gh (call :Green OK: Found GitHub CLI: %app.gh% & exit /b 0)
+if defined app.gh (call :AddGitHubCliToPath & call :Green OK: Found GitHub CLI: %app.gh% & exit /b 0)
 if not exist "%app.folder%\tools\GetGitCLI.bat" call :DownloadRepoGetGitCLI
 if not exist "%app.folder%\tools\GetGitCLI.bat" (call :Red FAIL: tools\GetGitCLI.bat was not found. & exit /b 6)
 call :Yellow DO: Installing GitHub CLI using tools\GetGitCLI.bat.
 pushd "%app.folder%" >nul
 call "tools\GetGitCLI.bat" >> "%app.log%" 2>&1
 set "egc_rc=%errorlevel%"
-popd >nul
+popd >nul 2>&1
+cd /d "%app.root%" >nul 2>&1
 if not "%egc_rc%"=="0" (call :Red FAIL: GetGitCLI.bat failed. & call :Yellow LOG: %app.log% & set "egc_rc=" & exit /b 6)
 set "egc_rc="
 call :FindGitHubCliExe
-if not defined app.gh (call :Red FAIL: gh.exe is still missing after GetGitCLI.bat. & exit /b 6)
+if not defined app.gh (call :Red FAIL: gh.exe is still missing after GetGitCLI.bat. & call :Yellow LOG: %app.log% & exit /b 6)
+call :AddGitHubCliToPath
 call :Green OK: GitHub CLI ready: %app.gh%
 exit /b 0
 
@@ -536,6 +548,7 @@ exit /b 0
 :: ============================================================
 :ResolveGitHubCLI
 call :FindGitHubCliExe
+if defined app.gh call :AddGitHubCliToPath
 exit /b 0
 
 :: ============================================================
@@ -550,6 +563,22 @@ set "app.gh="
 if exist "%app.folder%\tools\gh\bin\gh.exe" for %%A in ("%app.folder%\tools\gh\bin\gh.exe") do set "app.gh=%%~fA"
 if not defined app.gh if exist "%app.tools%\gh\bin\gh.exe" for %%A in ("%app.tools%\gh\bin\gh.exe") do set "app.gh=%%~fA"
 if not defined app.gh for %%P in (gh.exe) do set "app.gh=%%~$PATH:P"
+exit /b 0
+
+:: ============================================================
+:: Function: AddGitHubCliToPath
+:: Usage: call :AddGitHubCliToPath
+:: Purpose: prepends gh.exe's folder to PATH for child commands.
+:: Returns:
+::   0 always
+:: ============================================================
+:AddGitHubCliToPath
+if not defined app.gh exit /b 0
+for %%A in ("%app.gh%") do set "agctp_dir=%%~dpA"
+if not defined agctp_dir exit /b 0
+echo ;%PATH%;| find /I ";%agctp_dir%;" >nul 2>nul
+if errorlevel 1 set "PATH=%agctp_dir%;%PATH%"
+set "agctp_dir="
 exit /b 0
 
 :: ============================================================
@@ -569,24 +598,47 @@ exit /b 0
 :: ============================================================
 :: Function: EnsureGitHubLogin
 :: Usage: call :EnsureGitHubLogin
-:: Purpose: runs gh auth login if needed.
+:: Purpose: runs gh auth login if needed and verifies the GitHub username.
 :: Returns:
-::   0 logged in
+::   0 logged in and user verified
 ::   6 login failed
 :: ============================================================
 :EnsureGitHubLogin
+if not defined app.gh (call :Red FAIL: gh.exe is not ready. & exit /b 6)
 call :AddGitToPath
+call :AddGitHubCliToPath
 "%app.gh%" auth status >> "%app.log%" 2>&1
-if not errorlevel 1 (call :Green OK: GitHub login ready. & exit /b 0)
+if errorlevel 1 goto :EnsureGitHubLoginStart
+call :GetGitHubUser
+if errorlevel 1 goto :EnsureGitHubLoginStart
+call :Green OK: GitHub login ready: %app.github.user%
+exit /b 0
+:EnsureGitHubLoginStart
 call :Yellow DO: GitHub login.
 "%app.gh%" auth login --web --git-protocol https
 if errorlevel 1 (call :Red FAIL: GitHub login failed. & exit /b 6)
+call :AddGitToPath
 "%app.gh%" auth setup-git >> "%app.log%" 2>&1
 if errorlevel 1 call :Yellow WARN: gh auth setup-git failed; continuing because login may still be valid.
-"%app.gh%" auth status >> "%app.log%" 2>&1
+call :GetGitHubUser
 if errorlevel 1 (call :Red FAIL: GitHub login was not confirmed. & call :Yellow LOG: %app.log% & exit /b 6)
-call :Green OK: GitHub login ready.
+call :Green OK: GitHub login ready: %app.github.user%
 exit /b 0
+
+:: ============================================================
+:: Function: GetGitHubUser
+:: Usage: call :GetGitHubUser
+:: Purpose: captures the logged-in GitHub username in app.github.user.
+:: Returns:
+::   0 user captured
+::   6 user could not be captured
+:: ============================================================
+:GetGitHubUser
+set "app.github.user="
+if not defined app.gh exit /b 6
+for /f "usebackq delims=" %%A in (`"%app.gh%" api user --jq ".login" 2^>nul`) do set "app.github.user=%%A"
+if defined app.github.user exit /b 0
+exit /b 6
 
 :: ============================================================
 :: Function: MaybeForkRepo
@@ -597,8 +649,10 @@ exit /b 0
 ::   6 fork failed
 :: ============================================================
 :MaybeForkRepo
+if not defined app.github.user call :GetGitHubUser
+if errorlevel 1 (call :Red FAIL: could not determine GitHub user; fork step cannot continue. & exit /b 6)
 set "mfr_perm="
-for /f "delims=" %%A in ('"%app.gh%" repo view "%app.repo.owner%/%app.repo.name%" --json viewerPermission --jq ".viewerPermission" 2^>nul') do set "mfr_perm=%%A"
+for /f "usebackq delims=" %%A in (`"%app.gh%" repo view "%app.repo.owner%/%app.repo.name%" --json viewerPermission --jq ".viewerPermission" 2^>nul`) do set "mfr_perm=%%A"
 if /I "%mfr_perm%"=="ADMIN" (call :Green OK: You can push to original repo. & set "mfr_perm=" & exit /b 0)
 if /I "%mfr_perm%"=="MAINTAIN" (call :Green OK: You can push to original repo. & set "mfr_perm=" & exit /b 0)
 if /I "%mfr_perm%"=="WRITE" (call :Green OK: You can push to original repo. & set "mfr_perm=" & exit /b 0)
@@ -638,22 +692,21 @@ exit /b 0
 ::   6 fork failed
 :: ============================================================
 :CreateAndConfigureFork
-set "ccf_user="
-for /f "delims=" %%A in ('"%app.gh%" api user --jq ".login" 2^>nul') do set "ccf_user=%%A"
-if not defined ccf_user (call :Red FAIL: could not determine GitHub user. & exit /b 6)
-call :Yellow DO: Creating or using fork %ccf_user%/%app.repo.name%.
+if not defined app.github.user call :GetGitHubUser
+if errorlevel 1 (call :Red FAIL: could not determine GitHub user. & exit /b 6)
+call :Yellow DO: Creating or using fork %app.github.user%/%app.repo.name%.
 "%app.gh%" repo fork "%app.repo.owner%/%app.repo.name%" --clone=false >> "%app.log%" 2>&1
 if errorlevel 1 call :Yellow WARN: gh repo fork returned an error; it may already exist.
 pushd "%app.folder%" >nul
 "%app.git%" remote get-url upstream >nul 2>&1
 if errorlevel 1 "%app.git%" remote rename origin upstream >> "%app.log%" 2>&1
 "%app.git%" remote remove origin >> "%app.log%" 2>&1
-"%app.git%" remote add origin "https://github.com/%ccf_user%/%app.repo.name%.git" >> "%app.log%" 2>&1
-if errorlevel 1 (popd & call :Red FAIL: could not configure fork remote. & set "ccf_user=" & exit /b 6)
+"%app.git%" remote add origin "https://github.com/%app.github.user%/%app.repo.name%.git" >> "%app.log%" 2>&1
+if errorlevel 1 (popd & cd /d "%app.root%" >nul 2>&1 & call :Red FAIL: could not configure fork remote. & exit /b 6)
 "%app.git%" fetch origin >> "%app.log%" 2>&1
-popd >nul
+popd >nul 2>&1
+cd /d "%app.root%" >nul 2>&1
 call :Green OK: Fork remote configured.
-set "ccf_user="
 exit /b 0
 
 :: ============================================================
@@ -823,8 +876,8 @@ set /p "ml_choice=Choose [1-8, A=auto, 0=exit]: "
 if /I "%ml_choice%"=="a" (call :RunAutoWorkflow & pause & goto :MenuLoop)
 if /I "%ml_choice%"=="auto" (call :RunAutoWorkflow & pause & goto :MenuLoop)
 if "%ml_choice%"=="1" (call :EnsureGit & call :CloneOrUpdateRepo & pause & goto :MenuLoop)
-if "%ml_choice%"=="2" (call :EnsureGitHubCLI & call :EnsureGitHubLogin & pause & goto :MenuLoop)
-if "%ml_choice%"=="3" (call :EnsureGitHubCLI & call :EnsureGitHubLogin & call :MaybeForkRepo & pause & goto :MenuLoop)
+if "%ml_choice%"=="2" (call :EnsureGit & call :EnsureGitHubCLI & call :EnsureGitHubLogin & pause & goto :MenuLoop)
+if "%ml_choice%"=="3" (call :EnsureGit & call :EnsureGitHubCLI & call :EnsureGitHubLogin & call :MaybeForkRepo & pause & goto :MenuLoop)
 if "%ml_choice%"=="4" (call :RunPrepareStep & pause & goto :MenuLoop)
 if "%ml_choice%"=="5" (call :RunBuildStep & pause & goto :MenuLoop)
 if "%ml_choice%"=="6" (call :RunInstallStep & pause & goto :MenuLoop)
