@@ -23,7 +23,7 @@
 :: ============================================================
 cd /d "%~dp0"
 set "app.rc=0"
-set "app.version=bootstrap11"
+set "app.version=bootstrap12"
 set "app.root=%CD%"
 set "app.timestamp="
 set "app.log.dir=%app.root%\bootstrap_logs"
@@ -507,7 +507,7 @@ call :Yellow Do not type your email or password here; gh will handle login safel
 set "mpls_choice="
 set /p "mpls_choice=Login choice [Enter/nologin]: "
 if /I "%mpls_choice%"=="nologin" set "app.login.mode=none"
-if defined mpls_choice if not /I "%mpls_choice%"=="nologin" call :Yellow NOTE: input ignored; continuing with GitHub browser login.
+if defined mpls_choice if /I not "%mpls_choice%"=="nologin" call :Yellow NOTE: input ignored; continuing with GitHub browser login.
 set "mpls_choice="
 exit /b 0
 
@@ -679,7 +679,7 @@ set "afc_choice="
 set /p "afc_choice=Create/use a fork? [y/N]: "
 if /I "%afc_choice%"=="y" set "app.fork.mode=yes"
 if /I "%afc_choice%"=="yes" set "app.fork.mode=yes"
-if not /I "%app.fork.mode%"=="yes" set "app.fork.mode=no"
+if /I not "%app.fork.mode%"=="yes" set "app.fork.mode=no"
 set "afc_choice="
 exit /b 0
 
