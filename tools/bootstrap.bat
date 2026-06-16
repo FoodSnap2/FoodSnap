@@ -23,7 +23,7 @@
 :: ============================================================
 cd /d "%~dp0"
 set "app.rc=0"
-set "app.version=bootstrap12"
+set "app.version=bootstrap14"
 set "app.root=%CD%"
 set "app.timestamp="
 set "app.log.dir=%app.root%\bootstrap_logs"
@@ -67,6 +67,7 @@ call :ResolveRepoFolder || (set "app.rc=%errorlevel%" & goto :end)
 if defined app.auto goto :main_auto
 if /I "%app.mode%"=="auto" goto :main_auto
 if /I "%app.mode%"=="menu" goto :main_menu
+call :Cyan MODE: default [%app.version%]
 call :RunBootstrapWorkflow || (set "app.rc=%errorlevel%" & goto :end)
 set "app.rc=0"
 goto :end
@@ -76,6 +77,7 @@ call :RunAutoWorkflow || (set "app.rc=%errorlevel%" & goto :end)
 set "app.rc=0"
 goto :end
 :main_menu
+call :Cyan MODE: menu [%app.version%]
 call :ShowMenu || (set "app.rc=%errorlevel%" & goto :end)
 set "app.rc=0"
 goto :end
@@ -350,7 +352,7 @@ if defined app.git (call :AddGitToPath & call :Green OK: Found Git: %app.git% & 
 call :Yellow MISS: git.exe not found.
 call :EnsureGetGitHelper || exit /b 4
 call :Yellow DO: Installing Git using tools\GetGit.bat.
-call "%app.tools%\GetGit.bat" >> "%app.log%" 2>&1
+cmd.exe /D /C call "%app.tools%\GetGit.bat" >> "%app.log%" 2>&1
 set "eg_rc=%errorlevel%"
 cd /d "%app.root%" >nul 2>&1
 if not "%eg_rc%"=="0" (call :Red FAIL: GetGit.bat failed. & call :Yellow LOG: %app.log% & set "eg_rc=" & exit /b 4)
@@ -527,7 +529,7 @@ if not exist "%app.folder%\tools\GetGitCLI.bat" call :DownloadRepoGetGitCLI
 if not exist "%app.folder%\tools\GetGitCLI.bat" (call :Red FAIL: tools\GetGitCLI.bat was not found. & exit /b 6)
 call :Yellow DO: Installing GitHub CLI using tools\GetGitCLI.bat.
 pushd "%app.folder%" >nul
-call "tools\GetGitCLI.bat" >> "%app.log%" 2>&1
+cmd.exe /D /C call "tools\GetGitCLI.bat" >> "%app.log%" 2>&1
 set "egc_rc=%errorlevel%"
 popd >nul 2>&1
 cd /d "%app.root%" >nul 2>&1
@@ -801,7 +803,7 @@ if not exist "%app.folder%\prepare.bat" call :Yellow SKIP: prepare.bat not found
 if not exist "%app.folder%\prepare.bat" goto :RunBuildStepBuild
 call :Yellow DO: Running prepare.bat.
 pushd "%app.folder%" >nul
-call prepare.bat >> "%app.log%" 2>&1
+cmd.exe /D /C call prepare.bat >> "%app.log%" 2>&1
 set "rbs_rc=%errorlevel%"
 popd >nul
 if not "%rbs_rc%"=="0" (call :Red FAIL: prepare.bat failed. & call :Yellow LOG: %app.log% & set "rbs_rc=" & exit /b 8)
@@ -810,7 +812,7 @@ set "rbs_rc="
 if not exist "%app.folder%\build.bat" (call :Yellow SKIP: build.bat not found. & exit /b 0)
 call :Yellow DO: Running build.bat.
 pushd "%app.folder%" >nul
-call build.bat >> "%app.log%" 2>&1
+cmd.exe /D /C call build.bat >> "%app.log%" 2>&1
 set "rbs_rc=%errorlevel%"
 popd >nul
 if not "%rbs_rc%"=="0" (call :Red FAIL: build.bat failed. & call :Yellow LOG: %app.log% & set "rbs_rc=" & exit /b 8)
@@ -829,7 +831,7 @@ exit /b 0
 :RunPrepareStep
 if not exist "%app.folder%\prepare.bat" (call :Red FAIL: prepare.bat not found in %app.folder% & exit /b 8)
 pushd "%app.folder%" >nul
-call prepare.bat
+cmd.exe /D /C call prepare.bat
 set "rps_rc=%errorlevel%"
 popd >nul
 exit /b %rps_rc%
@@ -845,7 +847,7 @@ exit /b %rps_rc%
 :RunInstallStep
 if not exist "%app.folder%\install.bat" (call :Red FAIL: install.bat not found in %app.folder% & exit /b 8)
 pushd "%app.folder%" >nul
-call install.bat
+cmd.exe /D /C call install.bat
 set "ris_rc=%errorlevel%"
 popd >nul
 exit /b %ris_rc%
