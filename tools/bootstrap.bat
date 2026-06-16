@@ -25,7 +25,7 @@
 :: ============================================================
 cd /d "%~dp0"
 set "app.rc=0"
-set "app.version=bootstrap17"
+set "app.version=bootstrap19"
 set "app.root=%CD%"
 set "app.timestamp="
 set "app.log.dir=%app.root%\bootstrap_logs"
@@ -527,15 +527,16 @@ if /I "%app.login.mode%"=="none" (call :Yellow SKIP: GitHub login and fork steps
 call :EnsureGit
 set "mlaf_rc=%errorlevel%"
 if not "%mlaf_rc%"=="0" exit /b %mlaf_rc%
-call :EnsureGitHubCLI
-set "mlaf_rc=%errorlevel%"
-if not "%mlaf_rc%"=="0" exit /b %mlaf_rc%
-call :IsGitHubLoggedIn
-if not errorlevel 1 goto :MaybeLoginAndForkReady
+call :FindGitHubCliExe
+if defined app.gh call :IsGitHubLoggedIn
+if defined app.gh if not errorlevel 1 goto :MaybeLoginAndForkReady
 call :MaybePromptLoginSkip
 set "mlaf_rc=%errorlevel%"
 if not "%mlaf_rc%"=="0" exit /b %mlaf_rc%
 if /I "%app.login.mode%"=="none" (call :Yellow SKIP: GitHub login and fork steps skipped. & exit /b 0)
+call :EnsureGitHubCLI
+set "mlaf_rc=%errorlevel%"
+if not "%mlaf_rc%"=="0" exit /b %mlaf_rc%
 call :EnsureGitHubLogin
 set "mlaf_rc=%errorlevel%"
 if not "%mlaf_rc%"=="0" exit /b %mlaf_rc%
@@ -549,20 +550,30 @@ exit /b 0
 :: ============================================================
 :: Function: MaybePromptLoginSkip
 :: Usage: call :MaybePromptLoginSkip
-:: Purpose: in auto mode, lets user type nologin to skip GitHub auth.
+:: Purpose: asks whether to login; default Enter skips login and fork.
 :: Returns:
 ::   0 always
 
 :: ============================================================
 :MaybePromptLoginSkip
-if not defined app.auto exit /b 0
 call :Yellow GitHub login is optional.
-call :Yellow Press Enter to open the GitHub browser login, or type nologin to skip.
-call :Yellow Do not type your email or password here; gh will handle login safely.
+call :Yellow Press Enter to skip GitHub login and fork, or type y to login.
 set "mpls_choice="
-set /p "mpls_choice=Login choice [Enter/nologin]: "
-if /I "%mpls_choice%"=="nologin" set "app.login.mode=none"
-if defined mpls_choice if /I not "%mpls_choice%"=="nologin" call :Yellow NOTE: input ignored; continuing with GitHub browser login.
+set /p "mpls_choice=GitHub login? [y/N]: "
+if not defined mpls_choice goto :MaybePromptLoginSkipNo
+if /I "%mpls_choice%"=="n" goto :MaybePromptLoginSkipNo
+if /I "%mpls_choice%"=="no" goto :MaybePromptLoginSkipNo
+if /I "%mpls_choice%"=="nologin" goto :MaybePromptLoginSkipNo
+if /I "%mpls_choice%"=="y" goto :MaybePromptLoginSkipYes
+if /I "%mpls_choice%"=="yes" goto :MaybePromptLoginSkipYes
+call :Yellow NOTE: input ignored; skipping GitHub login and fork.
+goto :MaybePromptLoginSkipNo
+:MaybePromptLoginSkipYes
+set "app.login.mode=ask"
+set "mpls_choice="
+exit /b 0
+:MaybePromptLoginSkipNo
+set "app.login.mode=none"
 set "mpls_choice="
 exit /b 0
 
@@ -578,7 +589,7 @@ exit /b 0
 :EnsureGitHubCLI
 call :AddGitToPath
 call :FindGitHubCliExe
-if defined app.gh (call :AddGitHubCliToPath & call :Green OK: Found GitHub CLI: %app.gh% & exit /b 0)
+if defined app.gh (call :Green OK: Found GitHub CLI: %app.gh% & exit /b 0)
 if not exist "%app.folder%\tools\GetGitCLI.bat" call :DownloadRepoGetGitCLI
 if not exist "%app.folder%\tools\GetGitCLI.bat" (call :Red FAIL: tools\GetGitCLI.bat was not found. & exit /b 6)
 call :Yellow DO: Installing GitHub CLI using tools\GetGitCLI.bat.
@@ -591,7 +602,6 @@ if not "%egc_rc%"=="0" (call :Red FAIL: GetGitCLI.bat failed. & call :Yellow LOG
 set "egc_rc="
 call :FindGitHubCliExe
 if not defined app.gh (call :Red FAIL: gh.exe is still missing after GetGitCLI.bat. & call :Yellow LOG: %app.log% & exit /b 6)
-call :AddGitHubCliToPath
 call :Green OK: GitHub CLI ready: %app.gh%
 exit /b 0
 
@@ -605,7 +615,6 @@ exit /b 0
 :: ============================================================
 :ResolveGitHubCLI
 call :FindGitHubCliExe
-if defined app.gh call :AddGitHubCliToPath
 exit /b 0
 
 :: ============================================================
@@ -667,13 +676,21 @@ exit /b 0
 :EnsureGitHubLogin
 if not defined app.gh (call :Red FAIL: gh.exe is not ready. & exit /b 6)
 call :AddGitToPath
-call :AddGitHubCliToPath
 call :IsGitHubLoggedIn
 if not errorlevel 1 (call :Green OK: GitHub login ready: %app.github.user% & exit /b 0)
 call :ConfigureGitCredentialHelper
 call :Yellow DO: GitHub login.
-"%app.gh%" auth login --web --git-protocol https
-if errorlevel 1 (call :Red FAIL: GitHub login failed. & exit /b 6)
+call :Yellow NOTE: A one-time code will be shown. Use any browser/device to enter it.
+set "eghl_old_gh_browser=%GH_BROWSER%"
+set "eghl_old_browser=%BROWSER%"
+set "GH_BROWSER=echo"
+set "BROWSER=echo"
+echo. | "%app.gh%" auth login --web --git-protocol https
+set "eghl_rc=%errorlevel%"
+if defined eghl_old_gh_browser (set "GH_BROWSER=%eghl_old_gh_browser%") else (set "GH_BROWSER=")
+if defined eghl_old_browser (set "BROWSER=%eghl_old_browser%") else (set "BROWSER=")
+if not "%eghl_rc%"=="0" (call :Red FAIL: GitHub login failed. & set "eghl_rc=" & exit /b 6)
+set "eghl_rc="
 call :ConfigureGitCredentialHelper
 "%app.gh%" auth setup-git >> "%app.log%" 2>&1
 if errorlevel 1 call :Yellow WARN: gh auth setup-git failed; continuing because login may still be valid.
@@ -711,7 +728,6 @@ exit /b 6
 :IsGitHubLoggedIn
 if not defined app.gh exit /b 6
 call :AddGitToPath
-call :AddGitHubCliToPath
 "%app.gh%" auth status -h github.com >> "%app.log%" 2>&1
 if errorlevel 1 exit /b 6
 call :GetGitHubUser
@@ -745,6 +761,7 @@ exit /b 6
 :ConfigureGitCredentialHelper
 if not defined app.git exit /b 0
 "%app.git%" config --global credential.helper manager >> "%app.log%" 2>&1
+"%app.git%" config --global credential.helperselector.selected manager >> "%app.log%" 2>&1
 exit /b 0
 
 :: ============================================================
@@ -759,11 +776,14 @@ exit /b 0
 :MaybeForkRepo
 if not defined app.github.user call :GetGitHubUser
 if errorlevel 1 (call :Red FAIL: could not determine GitHub user; fork step cannot continue. & exit /b 6)
+if /I "%app.github.user%"=="%app.repo.owner%" (call :Green OK: Logged in as repo owner; original repo is writable. & exit /b 0)
 set "mfr_perm="
 for /f "usebackq delims=" %%A in (`"%app.gh%" repo view "%app.repo.owner%/%app.repo.name%" --json viewerPermission --jq ".viewerPermission" 2^>nul`) do set "mfr_perm=%%A"
 if /I "%mfr_perm%"=="ADMIN" (call :Green OK: You can push to original repo. & set "mfr_perm=" & exit /b 0)
 if /I "%mfr_perm%"=="MAINTAIN" (call :Green OK: You can push to original repo. & set "mfr_perm=" & exit /b 0)
 if /I "%mfr_perm%"=="WRITE" (call :Green OK: You can push to original repo. & set "mfr_perm=" & exit /b 0)
+call :CanPushToOrigin
+if not errorlevel 1 (call :Green OK: Push dry-run to original repo succeeded. & set "mfr_perm=" & exit /b 0)
 if not defined mfr_perm call :Yellow WARN: could not confirm write access to %app.repo.owner%/%app.repo.name%.
 if defined mfr_perm call :Yellow MISS: You do not appear to have write access to %app.repo.owner%/%app.repo.name%.
 if /I "%app.fork.mode%"=="no" (call :Yellow SKIP: fork not created. & set "mfr_perm=" & exit /b 0)
@@ -774,6 +794,26 @@ call :CreateAndConfigureFork
 set "mfr_rc=%errorlevel%"
 set "mfr_perm="
 exit /b %mfr_rc%
+
+:: ============================================================
+:: Function: CanPushToOrigin
+:: Usage: call :CanPushToOrigin
+:: Purpose: tests whether the current user can push to origin using git dry-run.
+:: Returns:
+::   0 push likely allowed
+::   1 push not confirmed
+:: ============================================================
+:CanPushToOrigin
+if not exist "%app.folder%\.git\" exit /b 1
+pushd "%app.folder%" >nul
+"%app.git%" remote get-url origin >nul 2>&1
+if errorlevel 1 (popd >nul & exit /b 1)
+"%app.git%" push --dry-run origin "HEAD:%app.repo.branch%" >> "%app.log%" 2>&1
+set "cpto_rc=%errorlevel%"
+popd >nul
+if "%cpto_rc%"=="0" (set "cpto_rc=" & exit /b 0)
+set "cpto_rc="
+exit /b 1
 
 :: ============================================================
 :: Function: AskForkChoice
@@ -804,19 +844,34 @@ exit /b 0
 :CreateAndConfigureFork
 if not defined app.github.user call :GetGitHubUser
 if errorlevel 1 (call :Red FAIL: could not determine GitHub user. & exit /b 6)
+if /I "%app.github.user%"=="%app.repo.owner%" (call :Green OK: Logged in user owns original repo; fork is not needed. & exit /b 0)
 call :Yellow DO: Creating or using fork %app.github.user%/%app.repo.name%.
 "%app.gh%" repo fork "%app.repo.owner%/%app.repo.name%" --clone=false >> "%app.log%" 2>&1
 if errorlevel 1 call :Yellow WARN: gh repo fork returned an error; it may already exist.
 pushd "%app.folder%" >nul
 "%app.git%" remote get-url upstream >nul 2>&1
-if errorlevel 1 "%app.git%" remote rename origin upstream >> "%app.log%" 2>&1
-"%app.git%" remote remove origin >> "%app.log%" 2>&1
+if errorlevel 1 call :MoveOriginToUpstream
+"%app.git%" remote get-url origin >nul 2>&1
+if not errorlevel 1 "%app.git%" remote remove origin >> "%app.log%" 2>&1
 "%app.git%" remote add origin "https://github.com/%app.github.user%/%app.repo.name%.git" >> "%app.log%" 2>&1
 if errorlevel 1 (popd & cd /d "%app.root%" >nul 2>&1 & call :Red FAIL: could not configure fork remote. & exit /b 6)
 "%app.git%" fetch origin >> "%app.log%" 2>&1
 popd >nul 2>&1
 cd /d "%app.root%" >nul 2>&1
 call :Green OK: Fork remote configured.
+exit /b 0
+
+:: ============================================================
+:: Function: MoveOriginToUpstream
+:: Usage: call :MoveOriginToUpstream
+:: Purpose: renames origin to upstream only when origin exists.
+:: Returns:
+::   0 always
+:: ============================================================
+:MoveOriginToUpstream
+"%app.git%" remote get-url origin >nul 2>&1
+if errorlevel 1 exit /b 0
+"%app.git%" remote rename origin upstream >> "%app.log%" 2>&1
 exit /b 0
 
 :: ============================================================
@@ -918,16 +973,6 @@ exit /b 0
 
 :: ============================================================
 :RunBuildStep
-if not exist "%app.folder%\prepare.bat" call :Yellow SKIP: prepare.bat not found.
-if not exist "%app.folder%\prepare.bat" goto :RunBuildStepBuild
-call :Yellow DO: Running prepare.bat.
-pushd "%app.folder%" >nul
-cmd.exe /D /C call prepare.bat >> "%app.log%" 2>&1
-set "rbs_rc=%errorlevel%"
-popd >nul
-if not "%rbs_rc%"=="0" (call :Red FAIL: prepare.bat failed. & call :Yellow LOG: %app.log% & set "rbs_rc=" & exit /b 8)
-set "rbs_rc="
-:RunBuildStepBuild
 if not exist "%app.folder%\build.bat" (call :Yellow SKIP: build.bat not found. & exit /b 0)
 call :Yellow DO: Running build.bat.
 pushd "%app.folder%" >nul

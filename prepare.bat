@@ -866,7 +866,7 @@ set "rfs_need_bytes=%~1"
 set "rfs_need_mb=?"
 set "rfs_free_mb=?"
 set "rfs_rc=1"
-for /f "tokens=1,2,3" %%A in ('powershell -NoProfile -ExecutionPolicy Bypass -Command "$d=$env:app.drive; $n=[int64]$env:rfs_need_bytes; $f=(Get-PSDrive -Name $d).Free; $need=[math]::Ceiling($n/1MB); $free=[math]::Floor($f/1MB); if ($f -lt $n) { Write-Output ($need.ToString() + ' ' + $free.ToString() + ' 1') } else { Write-Output ($need.ToString() + ' ' + $free.ToString() + ' 0') }" 2^>^> "%app.log%"') do set "rfs_need_mb=%%A" & set "rfs_free_mb=%%B" & set "rfs_rc=%%C"
+for /f "tokens=1,2,3" %%A in ('powershell -NoProfile -ExecutionPolicy Bypass -Command "$d='%app.drive%'; $n=[int64]'%rfs_need_bytes%'; $f=(Get-PSDrive -Name $d).Free; $need=[math]::Ceiling($n/1MB); $free=[math]::Floor($f/1MB); if ($f -lt $n) { Write-Output ($need.ToString() + ' ' + $free.ToString() + ' 1') } else { Write-Output ($need.ToString() + ' ' + $free.ToString() + ' 0') }" 2^>^> "%app.log%"') do set "rfs_need_mb=%%A" & set "rfs_free_mb=%%B" & set "rfs_rc=%%C"
 if "%rfs_rc%"=="0" goto :RequireFreeSpaceOK
 call :Red FAIL: not enough free disk space for %~2.
 call :Yellow DRIVE: %app.drive%:
