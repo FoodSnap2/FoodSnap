@@ -25,7 +25,7 @@
 :: ============================================================
 cd /d "%~dp0"
 set "app.rc=0"
-set "app.version=bootstrap16"
+set "app.version=bootstrap17"
 set "app.root=%CD%"
 set "app.timestamp="
 set "app.log.dir=%app.root%\bootstrap_logs"
@@ -321,7 +321,7 @@ exit /b 0
 set "app.auto=1"
 set "app.mode=auto"
 set "app.move.mode=documents"
-call :Yellow AUTO: Git, clone/update, verified optional login, fork if needed, move to Documents, build.
+call :Yellow AUTO: Git, clone/update, login only if needed, fork if needed, move to Documents, build.
 call :EnsureGit
 set "raw_rc=%errorlevel%"
 if not "%raw_rc%"=="0" exit /b %raw_rc%
@@ -468,6 +468,8 @@ exit /b 4
 
 :: ============================================================
 :CloneOrUpdateRepo
+if not defined app.git call :EnsureGit
+if not defined app.git (call :Red FAIL: git.exe is not ready. & exit /b 5)
 if exist "%app.folder%\.git\" goto :CloneOrUpdateRepoUpdate
 if not exist "%app.folder%\" goto :CloneOrUpdateRepoClone
 call :QuarantineNonGitFolder
@@ -505,6 +507,7 @@ set "qngf_old=%app.folder%.notgit.%app.timestamp%"
 call :Yellow WARN: target folder exists but is not a Git checkout: %app.folder%
 call :Yellow DO: Moving stale folder to %qngf_old%.
 move "%app.folder%" "%qngf_old%" >> "%app.log%" 2>&1
+if errorlevel 1 if not exist "%app.folder%\" (set "qngf_old=" & exit /b 0)
 if errorlevel 1 (call :Red FAIL: could not move stale folder. & call :Yellow LOG: %app.log% & set "qngf_old=" & exit /b 5)
 set "qngf_old="
 exit /b 0
@@ -521,19 +524,22 @@ exit /b 0
 :MaybeLoginAndFork
 if not "%app.repo.github%"=="1" exit /b 0
 if /I "%app.login.mode%"=="none" (call :Yellow SKIP: GitHub login and fork steps skipped. & exit /b 0)
-call :MaybePromptLoginSkip
-set "mlaf_rc=%errorlevel%"
-if not "%mlaf_rc%"=="0" exit /b %mlaf_rc%
-if /I "%app.login.mode%"=="none" (call :Yellow SKIP: GitHub login and fork steps skipped. & exit /b 0)
 call :EnsureGit
 set "mlaf_rc=%errorlevel%"
 if not "%mlaf_rc%"=="0" exit /b %mlaf_rc%
 call :EnsureGitHubCLI
 set "mlaf_rc=%errorlevel%"
 if not "%mlaf_rc%"=="0" exit /b %mlaf_rc%
+call :IsGitHubLoggedIn
+if not errorlevel 1 goto :MaybeLoginAndForkReady
+call :MaybePromptLoginSkip
+set "mlaf_rc=%errorlevel%"
+if not "%mlaf_rc%"=="0" exit /b %mlaf_rc%
+if /I "%app.login.mode%"=="none" (call :Yellow SKIP: GitHub login and fork steps skipped. & exit /b 0)
 call :EnsureGitHubLogin
 set "mlaf_rc=%errorlevel%"
 if not "%mlaf_rc%"=="0" exit /b %mlaf_rc%
+:MaybeLoginAndForkReady
 call :MaybeForkRepo
 set "mlaf_rc=%errorlevel%"
 if not "%mlaf_rc%"=="0" exit /b %mlaf_rc%
@@ -662,20 +668,16 @@ exit /b 0
 if not defined app.gh (call :Red FAIL: gh.exe is not ready. & exit /b 6)
 call :AddGitToPath
 call :AddGitHubCliToPath
-"%app.gh%" auth status >> "%app.log%" 2>&1
-if errorlevel 1 goto :EnsureGitHubLoginStart
-call :GetGitHubUser
-if errorlevel 1 goto :EnsureGitHubLoginStart
-call :Green OK: GitHub login ready: %app.github.user%
-exit /b 0
-:EnsureGitHubLoginStart
+call :IsGitHubLoggedIn
+if not errorlevel 1 (call :Green OK: GitHub login ready: %app.github.user% & exit /b 0)
+call :ConfigureGitCredentialHelper
 call :Yellow DO: GitHub login.
 "%app.gh%" auth login --web --git-protocol https
 if errorlevel 1 (call :Red FAIL: GitHub login failed. & exit /b 6)
-call :AddGitToPath
+call :ConfigureGitCredentialHelper
 "%app.gh%" auth setup-git >> "%app.log%" 2>&1
 if errorlevel 1 call :Yellow WARN: gh auth setup-git failed; continuing because login may still be valid.
-call :GetGitHubUser
+call :IsGitHubLoggedIn
 if errorlevel 1 (call :Red FAIL: GitHub login was not confirmed. & call :Yellow LOG: %app.log% & exit /b 6)
 call :Green OK: GitHub login ready: %app.github.user%
 exit /b 0
@@ -692,9 +694,58 @@ exit /b 0
 :GetGitHubUser
 set "app.github.user="
 if not defined app.gh exit /b 6
-for /f "usebackq delims=" %%A in (`"%app.gh%" api user --jq ".login" 2^>nul`) do set "app.github.user=%%A"
+for /f "usebackq delims=" %%A in (`"%app.gh%" api user --jq ".login" 2^>nul`) do if not defined app.github.user set "app.github.user=%%A"
+if defined app.github.user exit /b 0
+call :GetGitHubUserFromStatus
 if defined app.github.user exit /b 0
 exit /b 6
+
+:: ============================================================
+:: Function: IsGitHubLoggedIn
+:: Usage: call :IsGitHubLoggedIn
+:: Purpose: checks whether gh has an authenticated GitHub account and captures the user.
+:: Returns:
+::   0 logged in
+::   6 not logged in or user unknown
+:: ============================================================
+:IsGitHubLoggedIn
+if not defined app.gh exit /b 6
+call :AddGitToPath
+call :AddGitHubCliToPath
+"%app.gh%" auth status -h github.com >> "%app.log%" 2>&1
+if errorlevel 1 exit /b 6
+call :GetGitHubUser
+if errorlevel 1 exit /b 6
+exit /b 0
+
+:: ============================================================
+:: Function: GetGitHubUserFromStatus
+:: Usage: call :GetGitHubUserFromStatus
+:: Purpose: parses gh auth status output as a fallback username source.
+:: Returns:
+::   0 user captured
+::   6 user could not be captured
+:: ============================================================
+:GetGitHubUserFromStatus
+set "ggufs_file=%app.log.dir%\gh.auth.%app.timestamp%.txt"
+"%app.gh%" auth status -h github.com > "%ggufs_file%" 2>&1
+for /f "usebackq delims=" %%A in (`powershell -NoProfile -ExecutionPolicy Bypass -Command "$p=$env:ggufs_file; if(Test-Path -LiteralPath $p){$s=Get-Content -LiteralPath $p -Raw; if($s -match 'account\s+([A-Za-z0-9._-]+)'){ $matches[1] }}"`) do if not defined app.github.user set "app.github.user=%%A"
+del "%ggufs_file%" >nul 2>&1
+set "ggufs_file="
+if defined app.github.user exit /b 0
+exit /b 6
+
+:: ============================================================
+:: Function: ConfigureGitCredentialHelper
+:: Usage: call :ConfigureGitCredentialHelper
+:: Purpose: preselects Git Credential Manager to avoid Git's credential helper selector dialog.
+:: Returns:
+::   0 always
+:: ============================================================
+:ConfigureGitCredentialHelper
+if not defined app.git exit /b 0
+"%app.git%" config --global credential.helper manager >> "%app.log%" 2>&1
+exit /b 0
 
 :: ============================================================
 :: Function: MaybeForkRepo
@@ -1067,7 +1118,6 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "$ProgressPreference='Sil
 if exist "%df_file%" goto :DownloadFileOK
 call :Red FAIL: download failed.
 call :Yellow URL: %df_url%
-call :Yellow FILE: %df_file%
 set "df_url="
 set "df_file="
 exit /b 4
