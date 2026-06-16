@@ -1,11 +1,6 @@
 @echo off
-if defined app.bootstrap.fullpath goto :setup
-set "app.bootstrap.fullpath=1"
-call "%~f0" %*
-set "app.rc=%errorlevel%"
-set "app.bootstrap.fullpath="
-exit /b %app.rc%
 :setup
+
 :: ============================================================
 :: bootstrap.bat
 :: Generic local bootstrapper for Git repositories.
@@ -26,10 +21,11 @@ exit /b %app.rc%
 ::   - clone/update repo
 ::   - optionally login/fork/move/build/install
 ::   - auto mode bypasses menu and runs end-to-end
+
 :: ============================================================
 cd /d "%~dp0"
 set "app.rc=0"
-set "app.version=bootstrap15"
+set "app.version=bootstrap16"
 set "app.root=%CD%"
 set "app.timestamp="
 set "app.log.dir=%app.root%\bootstrap_logs"
@@ -64,28 +60,37 @@ set "app.color.yellow=33m"
 set "app.color.cyan=36m"
 set "app.color.white=37m"
 :main
-call :InitializeBootstrap || (set "app.rc=%errorlevel%" & goto :end)
-call :ParseArgs %* || (set "app.rc=%errorlevel%" & goto :end)
+call :InitializeBootstrap
+set "app.rc=%errorlevel%"
+if not "%app.rc%"=="0" goto :end
+call :ParseArgs %*
+set "app.rc=%errorlevel%"
+if not "%app.rc%"=="0" goto :end
 if defined app.auto set "app.mode=auto"
-if defined app.help (call :ShowHelp & set "app.rc=0" & goto :end)
-call :ResolveBootstrapContext || (set "app.rc=%errorlevel%" & goto :end)
-call :ResolveRepoFolder || (set "app.rc=%errorlevel%" & goto :end)
-if defined app.auto goto :main_auto
+if defined app.help call :ShowHelp
+if defined app.help set "app.rc=0"
+if defined app.help goto :end
+call :ResolveBootstrapContext
+set "app.rc=%errorlevel%"
+if not "%app.rc%"=="0" goto :end
+call :ResolveRepoFolder
+set "app.rc=%errorlevel%"
+if not "%app.rc%"=="0" goto :end
 if /I "%app.mode%"=="auto" goto :main_auto
 if /I "%app.mode%"=="menu" goto :main_menu
 call :Cyan MODE: default [%app.version%]
-call :RunBootstrapWorkflow || (set "app.rc=%errorlevel%" & goto :end)
-set "app.rc=0"
+call :RunBootstrapWorkflow
+set "app.rc=%errorlevel%"
 goto :end
 :main_auto
 call :Cyan MODE: auto [%app.version%]
-call :RunAutoWorkflow || (set "app.rc=%errorlevel%" & goto :end)
-set "app.rc=0"
+call :RunAutoWorkflow
+set "app.rc=%errorlevel%"
 goto :end
 :main_menu
 call :Cyan MODE: menu [%app.version%]
-call :ShowMenu || (set "app.rc=%errorlevel%" & goto :end)
-set "app.rc=0"
+call :ShowMenu
+set "app.rc=%errorlevel%"
 goto :end
 :end
 exit /b %app.rc%
@@ -97,6 +102,7 @@ exit /b %app.rc%
 :: Returns:
 ::   0 success
 ::   1 initialization failed
+
 :: ============================================================
 :InitializeBootstrap
 call :SetESC app.esc
@@ -116,6 +122,7 @@ exit /b 0
 :: Returns:
 ::   0 timestamp created
 ::   1 timestamp failed
+
 :: ============================================================
 :MakeTimestamp
 set "app.timestamp="
@@ -140,6 +147,7 @@ exit /b 1
 :: Returns:
 ::   0 success
 ::   2 invalid argument
+
 :: ============================================================
 :ParseArgs
 if "%~1"=="" exit /b 0
@@ -196,6 +204,7 @@ goto :ParseArgs
 :: Purpose: prints usage.
 :: Returns:
 ::   0 always
+
 :: ============================================================
 :ShowHelp
 call :Green Generic bootstrap.bat
@@ -228,6 +237,7 @@ exit /b 0
 :: Returns:
 ::   0 resolved
 ::   3 missing or invalid repo/bootstrap URL
+
 :: ============================================================
 :ResolveBootstrapContext
 if not defined app.repo.url if not defined app.bootstrap.url (call :Red FAIL: no repo URL and no bootstrap variable was provided. & call :Yellow TRY: bootstrap repo https://github.com/user/repo.git & exit /b 3)
@@ -246,6 +256,7 @@ exit /b 0
 :: Purpose: uses PowerShell to infer repo/helper URLs from app.bootstrap.url.
 :: Returns:
 ::   0 always
+
 :: ============================================================
 :InferFromBootstrapUrl
 for /f "tokens=1,* delims==" %%A in ('powershell -NoProfile -ExecutionPolicy Bypass -Command "$u=${env:app.bootstrap.url}; if(!$u){$u=$env:app_bootstrap_url}; if(!$u){$u=$env:bootstrap}; if(!$u){exit 0}; $uri=[uri]$u; $hostn=$uri.Host.ToLowerInvariant(); $path=$uri.AbsolutePath.Trim('/'); $p=$path -split '/'; $owner=''; $repo=''; $branch='main'; $repoUrl=''; $raw=''; $gh=''; if($hostn -eq 'raw.githubusercontent.com' -and $p.Length -ge 4){$owner=$p[0];$repo=$p[1];$branch=$p[2];$repoUrl='https://github.com/'+$owner+'/'+$repo+'.git';$raw='https://raw.githubusercontent.com/'+$owner+'/'+$repo+'/'+$branch+'/tools';$gh='1'} elseif($hostn -eq 'github.com' -and $p.Length -ge 4 -and $p[2] -eq 'blob'){$owner=$p[0];$repo=$p[1];$branch=$p[3];$repoUrl='https://github.com/'+$owner+'/'+$repo+'.git';$raw='https://raw.githubusercontent.com/'+$owner+'/'+$repo+'/'+$branch+'/tools';$gh='1'} else {if($p.Length -ge 1){$owner=$p[0]}; if($p.Length -ge 2){$repo=$p[1]}; $left=$uri.GetLeftPart([System.UriPartial]::Path); if($left.LastIndexOf('/') -gt 0){$raw=$left.Substring(0,$left.LastIndexOf('/'))}; if($owner -and $repo){$repoUrl=$uri.Scheme+'://'+$uri.Authority+'/'+$owner+'/'+$repo; if($repoUrl -notmatch '\.git$'){$repoUrl=$repoUrl+'.git'}}; if($hostn -eq 'github.com'){$gh='1'}else{$gh='0'}}; if($repoUrl){'repo.url='+$repoUrl}; if($owner){'repo.owner='+$owner}; if($repo){'repo.name='+$repo}; if($branch){'repo.branch='+$branch}; if($raw){'raw.tools.url='+$raw}; if($gh){'repo.github='+$gh}"') do call :SetAppValue "%%A" "%%B"
@@ -257,6 +268,7 @@ exit /b 0
 :: Purpose: infers owner, repo, GitHub flag, and raw tools URL from repo URL.
 :: Returns:
 ::   0 always
+
 :: ============================================================
 :InferFromRepoUrl
 for /f "tokens=1,* delims==" %%A in ('powershell -NoProfile -ExecutionPolicy Bypass -Command "$u=${env:app.repo.url}; if(!$u){$u=$env:app_repo_url}; if(!$u){exit 0}; $u=$u -replace '^git@github.com:','https://github.com/'; $u=$u -replace '^git@([^:]+):','https://$1/'; $uri=[uri]$u; $hostn=$uri.Host.ToLowerInvariant(); $p=$uri.AbsolutePath.Trim('/') -split '/'; if($p.Length -ge 2){$owner=$p[0];$repo=$p[1] -replace '\.git$',''; 'repo.owner='+$owner; 'repo.name='+$repo; if($hostn -eq 'github.com'){'repo.github=1'; 'raw.tools.url=https://raw.githubusercontent.com/'+$owner+'/'+$repo+'/'+${env:app.repo.branch}+'/tools'}else{'repo.github=0'}}"') do call :SetAppValue "%%A" "%%B"
@@ -273,6 +285,7 @@ exit /b 0
 ::   %~2 value
 :: Returns:
 ::   0 always
+
 :: ============================================================
 :SetAppValue
 if "%~1"=="" exit /b 0
@@ -286,6 +299,7 @@ exit /b 0
 :: Returns:
 ::   0 success
 ::   3 repo name missing
+
 :: ============================================================
 :ResolveRepoFolder
 if not defined app.repo.name (call :Red FAIL: could not determine repo name. & exit /b 3)
@@ -301,6 +315,7 @@ exit /b 0
 :: Returns:
 ::   0 success
 ::   nonzero failure
+
 :: ============================================================
 :RunAutoWorkflow
 set "app.auto=1"
@@ -308,15 +323,21 @@ set "app.mode=auto"
 set "app.move.mode=documents"
 call :Yellow AUTO: Git, clone/update, verified optional login, fork if needed, move to Documents, build.
 call :EnsureGit
-if errorlevel 1 exit /b %errorlevel%
+set "raw_rc=%errorlevel%"
+if not "%raw_rc%"=="0" exit /b %raw_rc%
 call :CloneOrUpdateRepo
-if errorlevel 1 exit /b %errorlevel%
+set "raw_rc=%errorlevel%"
+if not "%raw_rc%"=="0" exit /b %raw_rc%
 call :MaybeLoginAndFork
-if errorlevel 1 exit /b %errorlevel%
+set "raw_rc=%errorlevel%"
+if not "%raw_rc%"=="0" exit /b %raw_rc%
 call :MoveProjectToDocuments
-if errorlevel 1 exit /b %errorlevel%
+set "raw_rc=%errorlevel%"
+if not "%raw_rc%"=="0" exit /b %raw_rc%
 call :RunBuildStep
-if errorlevel 1 exit /b %errorlevel%
+set "raw_rc=%errorlevel%"
+if not "%raw_rc%"=="0" exit /b %raw_rc%
+set "raw_rc="
 call :Green OK: Auto bootstrap complete.
 call :Green DIR: %app.folder%
 exit /b 0
@@ -328,18 +349,22 @@ exit /b 0
 :: Returns:
 ::   0 success
 ::   nonzero failure
+
 :: ============================================================
 :RunBootstrapWorkflow
 call :EnsureGit
-if errorlevel 1 exit /b %errorlevel%
+set "rbw_rc=%errorlevel%"
+if not "%rbw_rc%"=="0" exit /b %rbw_rc%
 call :CloneOrUpdateRepo
-if errorlevel 1 exit /b %errorlevel%
+set "rbw_rc=%errorlevel%"
+if not "%rbw_rc%"=="0" exit /b %rbw_rc%
 call :MaybeLoginAndFork
-if errorlevel 1 exit /b %errorlevel%
+set "rbw_rc=%errorlevel%"
+if not "%rbw_rc%"=="0" exit /b %rbw_rc%
 call :MaybeMoveProject
-if errorlevel 1 exit /b %errorlevel%
-if defined app.auto call :RunBuildStep
-if errorlevel 1 exit /b %errorlevel%
+set "rbw_rc=%errorlevel%"
+if not "%rbw_rc%"=="0" exit /b %rbw_rc%
+set "rbw_rc="
 call :Green OK: Bootstrap complete.
 call :Green DIR: %app.folder%
 exit /b 0
@@ -351,6 +376,7 @@ exit /b 0
 :: Returns:
 ::   0 Git ready
 ::   4 Git install failed
+
 :: ============================================================
 :EnsureGit
 call :FindGitExe
@@ -375,6 +401,7 @@ exit /b 0
 :: Purpose: resolves local or PATH git.exe.
 :: Returns:
 ::   0 always
+
 :: ============================================================
 :ResolveGit
 call :FindGitExe
@@ -386,6 +413,7 @@ exit /b 0
 :: Purpose: resolves local or PATH git.exe into app.git.
 :: Returns:
 ::   0 always
+
 :: ============================================================
 :FindGitExe
 set "app.git="
@@ -400,6 +428,7 @@ exit /b 0
 :: Purpose: prepends resolved git.exe folder to PATH so gh can find Git.
 :: Returns:
 ::   0 always
+
 :: ============================================================
 :AddGitToPath
 if not defined app.git exit /b 0
@@ -417,6 +446,7 @@ exit /b 0
 :: Returns:
 ::   0 helper ready
 ::   4 helper missing/download failed
+
 :: ============================================================
 :EnsureGetGitHelper
 if exist "%app.tools%\GetGit.bat" exit /b 0
@@ -435,6 +465,7 @@ exit /b 4
 :: Returns:
 ::   0 cloned/updated
 ::   5 git operation failed
+
 :: ============================================================
 :CloneOrUpdateRepo
 if exist "%app.folder%\.git\" goto :CloneOrUpdateRepoUpdate
@@ -467,6 +498,7 @@ exit /b 0
 :: Returns:
 ::   0 folder moved/clear
 ::   5 folder could not be moved
+
 :: ============================================================
 :QuarantineNonGitFolder
 set "qngf_old=%app.folder%.notgit.%app.timestamp%"
@@ -484,20 +516,28 @@ exit /b 0
 :: Returns:
 ::   0 success/skipped
 ::   6 GitHub CLI operation failed
+
 :: ============================================================
 :MaybeLoginAndFork
 if not "%app.repo.github%"=="1" exit /b 0
 if /I "%app.login.mode%"=="none" (call :Yellow SKIP: GitHub login and fork steps skipped. & exit /b 0)
 call :MaybePromptLoginSkip
+set "mlaf_rc=%errorlevel%"
+if not "%mlaf_rc%"=="0" exit /b %mlaf_rc%
 if /I "%app.login.mode%"=="none" (call :Yellow SKIP: GitHub login and fork steps skipped. & exit /b 0)
 call :EnsureGit
-if errorlevel 1 exit /b %errorlevel%
+set "mlaf_rc=%errorlevel%"
+if not "%mlaf_rc%"=="0" exit /b %mlaf_rc%
 call :EnsureGitHubCLI
-if errorlevel 1 exit /b %errorlevel%
+set "mlaf_rc=%errorlevel%"
+if not "%mlaf_rc%"=="0" exit /b %mlaf_rc%
 call :EnsureGitHubLogin
-if errorlevel 1 exit /b %errorlevel%
+set "mlaf_rc=%errorlevel%"
+if not "%mlaf_rc%"=="0" exit /b %mlaf_rc%
 call :MaybeForkRepo
-if errorlevel 1 exit /b %errorlevel%
+set "mlaf_rc=%errorlevel%"
+if not "%mlaf_rc%"=="0" exit /b %mlaf_rc%
+set "mlaf_rc="
 exit /b 0
 
 :: ============================================================
@@ -506,6 +546,7 @@ exit /b 0
 :: Purpose: in auto mode, lets user type nologin to skip GitHub auth.
 :: Returns:
 ::   0 always
+
 :: ============================================================
 :MaybePromptLoginSkip
 if not defined app.auto exit /b 0
@@ -526,6 +567,7 @@ exit /b 0
 :: Returns:
 ::   0 gh ready
 ::   6 gh install failed
+
 :: ============================================================
 :EnsureGitHubCLI
 call :AddGitToPath
@@ -553,6 +595,7 @@ exit /b 0
 :: Purpose: resolves local or PATH gh.exe.
 :: Returns:
 ::   0 always
+
 :: ============================================================
 :ResolveGitHubCLI
 call :FindGitHubCliExe
@@ -565,6 +608,7 @@ exit /b 0
 :: Purpose: resolves local or PATH gh.exe into app.gh.
 :: Returns:
 ::   0 always
+
 :: ============================================================
 :FindGitHubCliExe
 set "app.gh="
@@ -579,6 +623,7 @@ exit /b 0
 :: Purpose: prepends gh.exe's folder to PATH for child commands.
 :: Returns:
 ::   0 always
+
 :: ============================================================
 :AddGitHubCliToPath
 if not defined app.gh exit /b 0
@@ -595,6 +640,7 @@ exit /b 0
 :: Purpose: downloads GetGitCLI.bat into the cloned repo if missing.
 :: Returns:
 ::   0 always
+
 :: ============================================================
 :DownloadRepoGetGitCLI
 if not defined app.getgh.url exit /b 0
@@ -610,6 +656,7 @@ exit /b 0
 :: Returns:
 ::   0 logged in and user verified
 ::   6 login failed
+
 :: ============================================================
 :EnsureGitHubLogin
 if not defined app.gh (call :Red FAIL: gh.exe is not ready. & exit /b 6)
@@ -640,6 +687,7 @@ exit /b 0
 :: Returns:
 ::   0 user captured
 ::   6 user could not be captured
+
 :: ============================================================
 :GetGitHubUser
 set "app.github.user="
@@ -655,6 +703,7 @@ exit /b 6
 :: Returns:
 ::   0 success/skipped
 ::   6 fork failed
+
 :: ============================================================
 :MaybeForkRepo
 if not defined app.github.user call :GetGitHubUser
@@ -681,6 +730,7 @@ exit /b %mfr_rc%
 :: Purpose: asks whether to create/use a GitHub fork.
 :: Returns:
 ::   0 always
+
 :: ============================================================
 :AskForkChoice
 set "afc_choice="
@@ -698,6 +748,7 @@ exit /b 0
 :: Returns:
 ::   0 fork configured
 ::   6 fork failed
+
 :: ============================================================
 :CreateAndConfigureFork
 if not defined app.github.user call :GetGitHubUser
@@ -724,6 +775,7 @@ exit /b 0
 :: Returns:
 ::   0 moved/skipped
 ::   7 move failed
+
 :: ============================================================
 :MaybeMoveProject
 if /I "%app.move.mode%"=="no" exit /b 0
@@ -749,14 +801,17 @@ exit /b %errorlevel%
 :: Returns:
 ::   0 moved/skipped
 ::   7 move failed
+
 :: ============================================================
 :MoveProjectToDocuments
 set "mptd_base="
-for /f "delims=" %%A in ('powershell -NoProfile -ExecutionPolicy Bypass -Command "[Environment]::GetFolderPath('MyDocuments')"') do set "mptd_base=%%A"
+for /f "delims=" %%A in ('powershell -NoProfile -ExecutionPolicy Bypass -Command "[Environment]::GetFolderPath([Environment+SpecialFolder]::MyDocuments)"') do set "mptd_base=%%A"
 if not defined mptd_base (call :Red FAIL: could not find Documents folder. & exit /b 7)
+if /I "%mptd_base%"=="." (call :Red FAIL: Documents folder resolved to an invalid path. & exit /b 7)
 call :MoveProjectToChosenFolder "%mptd_base%"
+set "mptd_rc=%errorlevel%"
 set "mptd_base="
-exit /b %errorlevel%
+exit /b %mptd_rc%
 
 :: ============================================================
 :: Function: MoveProjectWithFolderPicker
@@ -765,14 +820,16 @@ exit /b %errorlevel%
 :: Returns:
 ::   0 moved/skipped
 ::   7 move failed
+
 :: ============================================================
 :MoveProjectWithFolderPicker
 set "mpwfp_base="
 for /f "delims=" %%A in ('powershell -NoProfile -STA -ExecutionPolicy Bypass -Command "Add-Type -AssemblyName System.Windows.Forms; $d=New-Object System.Windows.Forms.FolderBrowserDialog; $d.Description='Choose destination folder for project'; if($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK){$d.SelectedPath}"') do set "mpwfp_base=%%A"
 if not defined mpwfp_base (call :Yellow MOVE: canceled; project kept at %app.folder% & exit /b 0)
 call :MoveProjectToChosenFolder "%mpwfp_base%"
+set "mpwfp_rc=%errorlevel%"
 set "mpwfp_base="
-exit /b %errorlevel%
+exit /b %mpwfp_rc%
 
 :: ============================================================
 :: Function: MoveProjectToChosenFolder
@@ -781,11 +838,15 @@ exit /b %errorlevel%
 :: Returns:
 ::   0 moved/skipped
 ::   7 move failed
+
 :: ============================================================
 :MoveProjectToChosenFolder
 set "mptcf_parent=%~1"
 if not defined mptcf_parent exit /b 0
+if not defined app.repo.name (call :Red FAIL: repo name is unknown; cannot move project. & set "mptcf_parent=" & exit /b 7)
+if not exist "%app.folder%\" (call :Red FAIL: project folder does not exist: %app.folder% & set "mptcf_parent=" & exit /b 7)
 for %%A in ("%mptcf_parent%\%app.repo.name%") do set "app.final.folder=%%~fA"
+if not defined app.final.folder (call :Red FAIL: destination could not be resolved. & set "mptcf_parent=" & exit /b 7)
 if /I "%app.final.folder%"=="%app.folder%" (call :Green OK: Project already in destination. & set "mptcf_parent=" & exit /b 0)
 if exist "%app.final.folder%\" (call :Yellow WARN: destination already exists: %app.final.folder% & set "app.folder=%app.final.folder%" & set "mptcf_parent=" & exit /b 0)
 call :Yellow DO: Moving project to %app.final.folder%.
@@ -803,6 +864,7 @@ exit /b 0
 :: Returns:
 ::   0 build succeeded or skipped
 ::   8 build failed
+
 :: ============================================================
 :RunBuildStep
 if not exist "%app.folder%\prepare.bat" call :Yellow SKIP: prepare.bat not found.
@@ -833,6 +895,7 @@ exit /b 0
 :: Returns:
 ::   0 success
 ::   8 prepare failed/missing
+
 :: ============================================================
 :RunPrepareStep
 if not exist "%app.folder%\prepare.bat" (call :Red FAIL: prepare.bat not found in %app.folder% & exit /b 8)
@@ -849,6 +912,7 @@ exit /b %rps_rc%
 :: Returns:
 ::   0 success
 ::   8 install failed/missing
+
 :: ============================================================
 :RunInstallStep
 if not exist "%app.folder%\install.bat" (call :Red FAIL: install.bat not found in %app.folder% & exit /b 8)
@@ -864,6 +928,7 @@ exit /b %ris_rc%
 :: Purpose: shows a DOS-style interactive text menu.
 :: Returns:
 ::   0 user exited
+
 :: ============================================================
 :ShowMenu
 call :MenuLoop
@@ -875,24 +940,68 @@ exit /b 0
 :: Purpose: interactive menu loop.
 :: Returns:
 ::   0 user exited
+
 :: ============================================================
 :MenuLoop
 cls
 call :DrawMenu
 set "ml_choice="
 set /p "ml_choice=Choose [1-8, A=auto, 0=exit]: "
-if /I "%ml_choice%"=="a" (call :RunAutoWorkflow & pause & goto :MenuLoop)
-if /I "%ml_choice%"=="auto" (call :RunAutoWorkflow & pause & goto :MenuLoop)
-if "%ml_choice%"=="1" (call :EnsureGit & call :CloneOrUpdateRepo & pause & goto :MenuLoop)
-if "%ml_choice%"=="2" (call :EnsureGit & call :EnsureGitHubCLI & call :EnsureGitHubLogin & pause & goto :MenuLoop)
-if "%ml_choice%"=="3" (call :EnsureGit & call :EnsureGitHubCLI & call :EnsureGitHubLogin & call :MaybeForkRepo & pause & goto :MenuLoop)
-if "%ml_choice%"=="4" (call :RunPrepareStep & pause & goto :MenuLoop)
-if "%ml_choice%"=="5" (call :RunBuildStep & pause & goto :MenuLoop)
-if "%ml_choice%"=="6" (call :RunInstallStep & pause & goto :MenuLoop)
-if "%ml_choice%"=="7" (set "app.move.mode=ask" & call :MaybeMoveProject & pause & goto :MenuLoop)
-if "%ml_choice%"=="8" (call :RunBootstrapWorkflow & pause & goto :MenuLoop)
+if /I "%ml_choice%"=="a" goto :MenuAuto
+if /I "%ml_choice%"=="auto" goto :MenuAuto
+if "%ml_choice%"=="1" goto :MenuClone
+if "%ml_choice%"=="2" goto :MenuLogin
+if "%ml_choice%"=="3" goto :MenuFork
+if "%ml_choice%"=="4" goto :MenuPrepare
+if "%ml_choice%"=="5" goto :MenuBuild
+if "%ml_choice%"=="6" goto :MenuInstall
+if "%ml_choice%"=="7" goto :MenuMove
+if "%ml_choice%"=="8" goto :MenuFull
 if "%ml_choice%"=="0" exit /b 0
 call :Yellow Choose 1-8, A, or 0.
+pause
+goto :MenuLoop
+:MenuAuto
+call :RunAutoWorkflow
+pause
+goto :MenuLoop
+:MenuClone
+call :EnsureGit
+if not errorlevel 1 call :CloneOrUpdateRepo
+pause
+goto :MenuLoop
+:MenuLogin
+call :EnsureGit
+if not errorlevel 1 call :EnsureGitHubCLI
+if not errorlevel 1 call :EnsureGitHubLogin
+pause
+goto :MenuLoop
+:MenuFork
+call :EnsureGit
+if not errorlevel 1 call :EnsureGitHubCLI
+if not errorlevel 1 call :EnsureGitHubLogin
+if not errorlevel 1 call :MaybeForkRepo
+pause
+goto :MenuLoop
+:MenuPrepare
+call :RunPrepareStep
+pause
+goto :MenuLoop
+:MenuBuild
+call :RunBuildStep
+pause
+goto :MenuLoop
+:MenuInstall
+call :RunInstallStep
+pause
+goto :MenuLoop
+:MenuMove
+set "app.move.mode=ask"
+call :MaybeMoveProject
+pause
+goto :MenuLoop
+:MenuFull
+call :RunBootstrapWorkflow
 pause
 goto :MenuLoop
 
@@ -902,6 +1011,7 @@ goto :MenuLoop
 :: Purpose: draws the DOS-style menu without passing pipe characters through CALL.
 :: Returns:
 ::   0 always
+
 :: ============================================================
 :DrawMenu
 if defined app.esc goto :DrawMenuColor
@@ -944,6 +1054,7 @@ exit /b 0
 :: Returns:
 ::   0 downloaded
 ::   4 download failed
+
 :: ============================================================
 :DownloadFile
 set "df_url=%~1"
@@ -972,6 +1083,7 @@ exit /b 0
 :: Returns:
 ::   0 success
 ::   2 missing output variable
+
 :: ============================================================
 :SetESC
 set "se_out=%~1"
@@ -986,6 +1098,7 @@ exit /b 0
 :: Purpose: prints/logs green status.
 :: Returns:
 ::   0 always
+
 :: ============================================================
 :Green
 if defined app.esc (echo %app.esc%[%app.color.green%%*%app.esc%[%app.color.reset%) else (echo %*)
@@ -998,6 +1111,7 @@ exit /b 0
 :: Purpose: prints/logs yellow status.
 :: Returns:
 ::   0 always
+
 :: ============================================================
 :Yellow
 if defined app.esc (echo %app.esc%[%app.color.yellow%%*%app.esc%[%app.color.reset%) else (echo %*)
@@ -1010,6 +1124,7 @@ exit /b 0
 :: Purpose: prints/logs red status.
 :: Returns:
 ::   0 always
+
 :: ============================================================
 :Red
 if defined app.esc (echo %app.esc%[%app.color.red%%*%app.esc%[%app.color.reset%) else (echo %*)
@@ -1022,6 +1137,7 @@ exit /b 0
 :: Purpose: prints/logs cyan status.
 :: Returns:
 ::   0 always
+
 :: ============================================================
 :Cyan
 if defined app.esc (echo %app.esc%[%app.color.cyan%%*%app.esc%[%app.color.reset%) else (echo %*)
