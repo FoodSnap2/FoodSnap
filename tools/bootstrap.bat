@@ -19,6 +19,7 @@
 ::   - get local Git before cloning
 ::   - clone/update repo
 ::   - optionally login/fork/move/build/install
+::   - auto mode bypasses menu and runs end-to-end
 :: ============================================================
 cd /d "%~dp0"
 set "app.rc=0"
@@ -57,9 +58,11 @@ set "app.color.white=37m"
 :main
 call :InitializeBootstrap || (set "app.rc=%errorlevel%" & goto :end)
 call :ParseArgs %* || (set "app.rc=%errorlevel%" & goto :end)
+if defined app.auto set "app.mode=auto"
 if defined app.help (call :ShowHelp & set "app.rc=0" & goto :end)
 call :ResolveBootstrapContext || (set "app.rc=%errorlevel%" & goto :end)
 call :ResolveRepoFolder || (set "app.rc=%errorlevel%" & goto :end)
+if /I "%app.mode%"=="auto" (call :RunAutoWorkflow || (set "app.rc=%errorlevel%" & goto :end) & set "app.rc=0" & goto :end)
 if /I "%app.mode%"=="menu" (call :ShowMenu || (set "app.rc=%errorlevel%" & goto :end) & set "app.rc=0" & goto :end)
 call :RunBootstrapWorkflow || (set "app.rc=%errorlevel%" & goto :end)
 set "app.rc=0"
@@ -224,7 +227,7 @@ exit /b 0
 ::   0 always
 :: ============================================================
 :InferFromBootstrapUrl
-for /f "tokens=1,* delims==" %%A in ('powershell -NoProfile -ExecutionPolicy Bypass -Command "$u=$env:app_bootstrap_url; if(!$u){$u=$env:bootstrap}; if(!$u){exit 0}; $uri=[uri]$u; $hostn=$uri.Host.ToLowerInvariant(); $path=$uri.AbsolutePath.Trim('/'); $p=$path -split '/'; $owner=''; $repo=''; $branch='main'; $repoUrl=''; $raw=''; $gh=''; if($hostn -eq 'raw.githubusercontent.com' -and $p.Length -ge 4){$owner=$p[0];$repo=$p[1];$branch=$p[2];$repoUrl='https://github.com/'+$owner+'/'+$repo+'.git';$raw='https://raw.githubusercontent.com/'+$owner+'/'+$repo+'/'+$branch+'/tools';$gh='1'} elseif($hostn -eq 'github.com' -and $p.Length -ge 4 -and $p[2] -eq 'blob'){$owner=$p[0];$repo=$p[1];$branch=$p[3];$repoUrl='https://github.com/'+$owner+'/'+$repo+'.git';$raw='https://raw.githubusercontent.com/'+$owner+'/'+$repo+'/'+$branch+'/tools';$gh='1'} else {if($p.Length -ge 1){$owner=$p[0]}; if($p.Length -ge 2){$repo=$p[1]}; $left=$uri.GetLeftPart([System.UriPartial]::Path); if($left.LastIndexOf('/') -gt 0){$raw=$left.Substring(0,$left.LastIndexOf('/'))}; if($owner -and $repo){$repoUrl=$uri.Scheme+'://'+$uri.Authority+'/'+$owner+'/'+$repo; if($repoUrl -notmatch '\.git$'){$repoUrl=$repoUrl+'.git'}}; if($hostn -eq 'github.com'){$gh='1'}else{$gh='0'}}; if($repoUrl){'repo.url='+$repoUrl}; if($owner){'repo.owner='+$owner}; if($repo){'repo.name='+$repo}; if($branch){'repo.branch='+$branch}; if($raw){'raw.tools.url='+$raw}; if($gh){'repo.github='+$gh}"') do call :SetAppValue "%%A" "%%B"
+for /f "tokens=1,* delims==" %%A in ('powershell -NoProfile -ExecutionPolicy Bypass -Command "$u=${env:app.bootstrap.url}; if(!$u){$u=$env:app_bootstrap_url}; if(!$u){$u=$env:bootstrap}; if(!$u){exit 0}; $uri=[uri]$u; $hostn=$uri.Host.ToLowerInvariant(); $path=$uri.AbsolutePath.Trim('/'); $p=$path -split '/'; $owner=''; $repo=''; $branch='main'; $repoUrl=''; $raw=''; $gh=''; if($hostn -eq 'raw.githubusercontent.com' -and $p.Length -ge 4){$owner=$p[0];$repo=$p[1];$branch=$p[2];$repoUrl='https://github.com/'+$owner+'/'+$repo+'.git';$raw='https://raw.githubusercontent.com/'+$owner+'/'+$repo+'/'+$branch+'/tools';$gh='1'} elseif($hostn -eq 'github.com' -and $p.Length -ge 4 -and $p[2] -eq 'blob'){$owner=$p[0];$repo=$p[1];$branch=$p[3];$repoUrl='https://github.com/'+$owner+'/'+$repo+'.git';$raw='https://raw.githubusercontent.com/'+$owner+'/'+$repo+'/'+$branch+'/tools';$gh='1'} else {if($p.Length -ge 1){$owner=$p[0]}; if($p.Length -ge 2){$repo=$p[1]}; $left=$uri.GetLeftPart([System.UriPartial]::Path); if($left.LastIndexOf('/') -gt 0){$raw=$left.Substring(0,$left.LastIndexOf('/'))}; if($owner -and $repo){$repoUrl=$uri.Scheme+'://'+$uri.Authority+'/'+$owner+'/'+$repo; if($repoUrl -notmatch '\.git$'){$repoUrl=$repoUrl+'.git'}}; if($hostn -eq 'github.com'){$gh='1'}else{$gh='0'}}; if($repoUrl){'repo.url='+$repoUrl}; if($owner){'repo.owner='+$owner}; if($repo){'repo.name='+$repo}; if($branch){'repo.branch='+$branch}; if($raw){'raw.tools.url='+$raw}; if($gh){'repo.github='+$gh}"') do call :SetAppValue "%%A" "%%B"
 exit /b 0
 
 :: ============================================================
@@ -235,7 +238,7 @@ exit /b 0
 ::   0 always
 :: ============================================================
 :InferFromRepoUrl
-for /f "tokens=1,* delims==" %%A in ('powershell -NoProfile -ExecutionPolicy Bypass -Command "$u=$env:app_repo_url; if(!$u){exit 0}; $u=$u -replace '^git@github.com:','https://github.com/'; $u=$u -replace '^git@([^:]+):','https://$1/'; $uri=[uri]$u; $hostn=$uri.Host.ToLowerInvariant(); $p=$uri.AbsolutePath.Trim('/') -split '/'; if($p.Length -ge 2){$owner=$p[0];$repo=$p[1] -replace '\.git$',''; 'repo.owner='+$owner; 'repo.name='+$repo; if($hostn -eq 'github.com'){'repo.github=1'; 'raw.tools.url=https://raw.githubusercontent.com/'+$owner+'/'+$repo+'/'+$env:app_repo_branch+'/tools'}else{'repo.github=0'}}"') do call :SetAppValue "%%A" "%%B"
+for /f "tokens=1,* delims==" %%A in ('powershell -NoProfile -ExecutionPolicy Bypass -Command "$u=${env:app.repo.url}; if(!$u){$u=$env:app_repo_url}; if(!$u){exit 0}; $u=$u -replace '^git@github.com:','https://github.com/'; $u=$u -replace '^git@([^:]+):','https://$1/'; $uri=[uri]$u; $hostn=$uri.Host.ToLowerInvariant(); $p=$uri.AbsolutePath.Trim('/') -split '/'; if($p.Length -ge 2){$owner=$p[0];$repo=$p[1] -replace '\.git$',''; 'repo.owner='+$owner; 'repo.name='+$repo; if($hostn -eq 'github.com'){'repo.github=1'; 'raw.tools.url=https://raw.githubusercontent.com/'+$owner+'/'+$repo+'/'+${env:app.repo.branch}+'/tools'}else{'repo.github=0'}}"') do call :SetAppValue "%%A" "%%B"
 if defined app.repo.github if "%app.repo.github%"=="1" if not defined app.getgit.url set "app.getgit.url=%app.raw.tools.url%/GetGit.bat"
 if defined app.repo.github if "%app.repo.github%"=="1" if not defined app.getgh.url set "app.getgh.url=%app.raw.tools.url%/GetGitCLI.bat"
 exit /b 0
@@ -269,6 +272,22 @@ if not defined app.folder set "app.folder=%app.root%\%app.repo.name%"
 for %%A in ("%app.folder%") do set "app.folder=%%~fA"
 call :Green OK: Folder: %app.folder%
 exit /b 0
+
+:: ============================================================
+:: Function: RunAutoWorkflow
+:: Usage: call :RunAutoWorkflow
+:: Purpose: runs the fully automatic workflow.
+:: Returns:
+::   0 success
+::   nonzero failure
+:: ============================================================
+:RunAutoWorkflow
+set "app.auto=1"
+set "app.mode=auto"
+set "app.move.mode=documents"
+call :Yellow AUTO: clone/update, login prompt, fork if needed, move to Documents, build.
+call :RunBootstrapWorkflow
+exit /b %errorlevel%
 
 :: ============================================================
 :: Function: RunBootstrapWorkflow
@@ -381,9 +400,9 @@ exit /b 0
 :MaybeLoginAndFork
 if not "%app.repo.github%"=="1" exit /b 0
 if /I "%app.login.mode%"=="none" (call :Yellow SKIP: GitHub login and fork steps skipped. & exit /b 0)
-call :EnsureGitHubCLI || exit /b %errorlevel%
 call :MaybePromptLoginSkip
 if /I "%app.login.mode%"=="none" (call :Yellow SKIP: GitHub login and fork steps skipped. & exit /b 0)
+call :EnsureGitHubCLI || exit /b %errorlevel%
 call :EnsureGitHubLogin || exit /b %errorlevel%
 call :MaybeForkRepo || exit /b %errorlevel%
 exit /b 0
@@ -682,7 +701,6 @@ exit /b %ris_rc%
 ::   0 user exited
 :: ============================================================
 :ShowMenu
-call :EnsureGit
 call :MenuLoop
 exit /b 0
 
@@ -695,31 +713,64 @@ exit /b 0
 :: ============================================================
 :MenuLoop
 cls
-call :Cyan +------------------------------------------------------------+
-call :Cyan ^|                   FoodSnap Bootstrap Menu                 ^|
-call :Cyan +------------------------------------------------------------+
-call :Cyan ^|  1  Clone or update repo                                  ^|
-call :Cyan ^|  2  Log in to GitHub                                      ^|
-call :Cyan ^|  3  Fork repo / configure remotes                         ^|
-call :Cyan ^|  4  Run prepare.bat                                       ^|
-call :Cyan ^|  5  Run build.bat                                         ^|
-call :Cyan ^|  6  Run install.bat                                       ^|
-call :Cyan ^|  7  Move project folder                                   ^|
-call :Cyan ^|  8  Run full bootstrap                                    ^|
-call :Cyan ^|  0  Exit                                                  ^|
-call :Cyan +------------------------------------------------------------+
+call :DrawMenu
 set "ml_choice="
-set /p "ml_choice=Choose: "
-if "%ml_choice%"=="1" call :EnsureGit & call :CloneOrUpdateRepo & pause & goto :MenuLoop
-if "%ml_choice%"=="2" call :EnsureGitHubCLI & call :EnsureGitHubLogin & pause & goto :MenuLoop
-if "%ml_choice%"=="3" call :EnsureGitHubCLI & call :EnsureGitHubLogin & call :MaybeForkRepo & pause & goto :MenuLoop
-if "%ml_choice%"=="4" call :RunPrepareStep & pause & goto :MenuLoop
-if "%ml_choice%"=="5" call :RunBuildStep & pause & goto :MenuLoop
-if "%ml_choice%"=="6" call :RunInstallStep & pause & goto :MenuLoop
-if "%ml_choice%"=="7" set "app.move.mode=ask" & call :MaybeMoveProject & pause & goto :MenuLoop
-if "%ml_choice%"=="8" call :RunBootstrapWorkflow & pause & goto :MenuLoop
+set /p "ml_choice=Choose [1-8, A=auto, 0=exit]: "
+if /I "%ml_choice%"=="a" (call :RunAutoWorkflow & pause & goto :MenuLoop)
+if /I "%ml_choice%"=="auto" (call :RunAutoWorkflow & pause & goto :MenuLoop)
+if "%ml_choice%"=="1" (call :EnsureGit & call :CloneOrUpdateRepo & pause & goto :MenuLoop)
+if "%ml_choice%"=="2" (call :EnsureGitHubCLI & call :EnsureGitHubLogin & pause & goto :MenuLoop)
+if "%ml_choice%"=="3" (call :EnsureGitHubCLI & call :EnsureGitHubLogin & call :MaybeForkRepo & pause & goto :MenuLoop)
+if "%ml_choice%"=="4" (call :RunPrepareStep & pause & goto :MenuLoop)
+if "%ml_choice%"=="5" (call :RunBuildStep & pause & goto :MenuLoop)
+if "%ml_choice%"=="6" (call :RunInstallStep & pause & goto :MenuLoop)
+if "%ml_choice%"=="7" (set "app.move.mode=ask" & call :MaybeMoveProject & pause & goto :MenuLoop)
+if "%ml_choice%"=="8" (call :RunBootstrapWorkflow & pause & goto :MenuLoop)
 if "%ml_choice%"=="0" exit /b 0
+call :Yellow Choose 1-8, A, or 0.
+pause
 goto :MenuLoop
+
+:: ============================================================
+:: Function: DrawMenu
+:: Usage: call :DrawMenu
+:: Purpose: draws the DOS-style menu without passing pipe characters through CALL.
+:: Returns:
+::   0 always
+:: ============================================================
+:DrawMenu
+if defined app.esc goto :DrawMenuColor
+echo +------------------------------------------------------------+
+echo ^|                   FoodSnap Bootstrap Menu                 ^|
+echo +------------------------------------------------------------+
+echo ^|  1  Clone or update repo                                  ^|
+echo ^|  2  Log in to GitHub                                      ^|
+echo ^|  3  Fork repo / configure remotes                         ^|
+echo ^|  4  Run prepare.bat                                       ^|
+echo ^|  5  Run build.bat                                         ^|
+echo ^|  6  Run install.bat                                       ^|
+echo ^|  7  Move project folder                                   ^|
+echo ^|  8  Run full bootstrap                                    ^|
+echo ^|  A  Auto: clone, login prompt, fork, Documents, build      ^|
+echo ^|  0  Exit                                                  ^|
+echo +------------------------------------------------------------+
+exit /b 0
+:DrawMenuColor
+echo %app.esc%[%app.color.cyan%+------------------------------------------------------------+%app.esc%[%app.color.reset%
+echo %app.esc%[%app.color.cyan%^|                   FoodSnap Bootstrap Menu                 ^|%app.esc%[%app.color.reset%
+echo %app.esc%[%app.color.cyan%+------------------------------------------------------------+%app.esc%[%app.color.reset%
+echo %app.esc%[%app.color.cyan%^|  1  Clone or update repo                                  ^|%app.esc%[%app.color.reset%
+echo %app.esc%[%app.color.cyan%^|  2  Log in to GitHub                                      ^|%app.esc%[%app.color.reset%
+echo %app.esc%[%app.color.cyan%^|  3  Fork repo / configure remotes                         ^|%app.esc%[%app.color.reset%
+echo %app.esc%[%app.color.cyan%^|  4  Run prepare.bat                                       ^|%app.esc%[%app.color.reset%
+echo %app.esc%[%app.color.cyan%^|  5  Run build.bat                                         ^|%app.esc%[%app.color.reset%
+echo %app.esc%[%app.color.cyan%^|  6  Run install.bat                                       ^|%app.esc%[%app.color.reset%
+echo %app.esc%[%app.color.cyan%^|  7  Move project folder                                   ^|%app.esc%[%app.color.reset%
+echo %app.esc%[%app.color.cyan%^|  8  Run full bootstrap                                    ^|%app.esc%[%app.color.reset%
+echo %app.esc%[%app.color.cyan%^|  A  Auto: clone, login prompt, fork, Documents, build      ^|%app.esc%[%app.color.reset%
+echo %app.esc%[%app.color.cyan%^|  0  Exit                                                  ^|%app.esc%[%app.color.reset%
+echo %app.esc%[%app.color.cyan%+------------------------------------------------------------+%app.esc%[%app.color.reset%
+exit /b 0
 
 :: ============================================================
 :: Function: DownloadFile
