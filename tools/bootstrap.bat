@@ -25,7 +25,7 @@
 :: ============================================================
 cd /d "%~dp0"
 set "app.rc=0"
-set "app.version=bootstrap22"
+set "app.version=bootstrap23"
 set "app.root=%CD%"
 set "app.timestamp="
 set "app.log.dir=%app.root%\bootstrap_logs"
@@ -324,16 +324,35 @@ exit /b 0
 set "app.auto=1"
 set "app.mode=auto"
 set "app.move.mode=documents"
-call :Yellow AUTO: Git, clone/update, optional login, optional fork, move to Documents, prepare, build.
+set "app.login.mode=none"
+set "app.fork.mode=no"
+echo AUTO: Git, clone/update, optional login, optional fork, move to Documents, prepare, build.
+if defined app.log >>"%app.log%" echo AUTO: Git, clone/update, optional login, optional fork, move to Documents, prepare, build.
 call :EnsureGit
 set "raw_rc=%errorlevel%"
 if not "%raw_rc%"=="0" exit /b %raw_rc%
 call :CloneOrUpdateRepo
 set "raw_rc=%errorlevel%"
 if not "%raw_rc%"=="0" exit /b %raw_rc%
-call :MaybeLoginAndFork
+call :PromptAutoGitHubLogin
 set "raw_rc=%errorlevel%"
 if not "%raw_rc%"=="0" exit /b %raw_rc%
+if /I "%app.login.mode%"=="login" goto :RunAutoWorkflowGitHub
+echo SKIP: GitHub login and fork steps skipped.
+if defined app.log >>"%app.log%" echo SKIP: GitHub login and fork steps skipped.
+goto :RunAutoWorkflowAfterGitHub
+:RunAutoWorkflowGitHub
+set "app.fork.mode=yes"
+call :EnsureGitHubCLI
+set "raw_rc=%errorlevel%"
+if not "%raw_rc%"=="0" exit /b %raw_rc%
+call :EnsureGitHubLogin
+set "raw_rc=%errorlevel%"
+if not "%raw_rc%"=="0" exit /b %raw_rc%
+call :MaybeForkRepo
+set "raw_rc=%errorlevel%"
+if not "%raw_rc%"=="0" exit /b %raw_rc%
+:RunAutoWorkflowAfterGitHub
 call :MoveProjectToDocuments
 set "raw_rc=%errorlevel%"
 if not "%raw_rc%"=="0" exit /b %raw_rc%
@@ -521,6 +540,35 @@ move "%app.folder%" "%qngf_old%" >> "%app.log%" 2>&1
 if errorlevel 1 if not exist "%app.folder%\" (set "qngf_old=" & exit /b 0)
 if errorlevel 1 (call :Red FAIL: could not move stale folder. & call :Yellow LOG: %app.log% & set "qngf_old=" & exit /b 5)
 set "qngf_old="
+exit /b 0
+
+:: ============================================================
+:: Function: PromptAutoGitHubLogin
+:: Usage: call :PromptAutoGitHubLogin
+:: Purpose: asks whether auto mode should login to GitHub; Enter skips login and fork.
+:: Returns:
+::   0 always
+
+:: ============================================================
+:PromptAutoGitHubLogin
+set "paghl_choice="
+echo GitHub login is optional.
+if defined app.log >>"%app.log%" echo GitHub login is optional.
+echo Press Enter to skip GitHub login and fork, or type y to login.
+if defined app.log >>"%app.log%" echo Press Enter to skip GitHub login and fork, or type y to login.
+set /p "paghl_choice=GitHub login? [y/N]: "
+if /I "%paghl_choice%"=="y" goto :PromptAutoGitHubLoginYes
+if /I "%paghl_choice%"=="yes" goto :PromptAutoGitHubLoginYes
+if defined paghl_choice echo NOTE: input ignored; skipping GitHub login and fork.
+if defined paghl_choice if defined app.log >>"%app.log%" echo NOTE: input ignored; skipping GitHub login and fork.
+set "app.login.mode=none"
+set "app.fork.mode=no"
+set "paghl_choice="
+exit /b 0
+:PromptAutoGitHubLoginYes
+set "app.login.mode=login"
+set "app.fork.mode=yes"
+set "paghl_choice="
 exit /b 0
 
 :: ============================================================
@@ -792,6 +840,10 @@ exit /b 0
 
 :: ============================================================
 :MaybeForkRepo
+if not defined app.gh (call :Red FAIL: gh.exe is not ready; fork step cannot continue. & exit /b 6)
+if not exist "%app.gh%" (call :Red FAIL: gh.exe path is invalid: %app.gh% & exit /b 6)
+if not defined app.repo.owner (call :Red FAIL: repo owner is unknown; fork step cannot continue. & exit /b 6)
+if not defined app.repo.name (call :Red FAIL: repo name is unknown; fork step cannot continue. & exit /b 6)
 if not defined app.github.user call :GetGitHubUser
 if errorlevel 1 (call :Red FAIL: could not determine GitHub user; fork step cannot continue. & exit /b 6)
 for /f "tokens=* delims= " %%A in ("%app.github.user%") do set "app.github.user=%%A"
@@ -801,8 +853,6 @@ for /f "usebackq delims=" %%A in (`"%app.gh%" repo view "%app.repo.owner%/%app.r
 if /I "%mfr_perm%"=="ADMIN" (call :Green OK: You can push to original repo. & set "mfr_perm=" & exit /b 0)
 if /I "%mfr_perm%"=="MAINTAIN" (call :Green OK: You can push to original repo. & set "mfr_perm=" & exit /b 0)
 if /I "%mfr_perm%"=="WRITE" (call :Green OK: You can push to original repo. & set "mfr_perm=" & exit /b 0)
-call :CanPushToOrigin
-if not errorlevel 1 (call :Green OK: Push dry-run to original repo succeeded. & set "mfr_perm=" & exit /b 0)
 if not defined mfr_perm call :Yellow WARN: could not confirm write access to %app.repo.owner%/%app.repo.name%.
 if defined mfr_perm call :Yellow MISS: You do not appear to have write access to %app.repo.owner%/%app.repo.name%.
 if /I "%app.fork.mode%"=="no" (call :Yellow SKIP: fork not created. & set "mfr_perm=" & exit /b 0)
@@ -861,6 +911,10 @@ exit /b 0
 
 :: ============================================================
 :CreateAndConfigureFork
+if not defined app.gh (call :Red FAIL: gh.exe is not ready; fork cannot continue. & exit /b 6)
+if not exist "%app.gh%" (call :Red FAIL: gh.exe path is invalid: %app.gh% & exit /b 6)
+if not defined app.repo.owner (call :Red FAIL: repo owner is unknown; fork cannot continue. & exit /b 6)
+if not defined app.repo.name (call :Red FAIL: repo name is unknown; fork cannot continue. & exit /b 6)
 if not defined app.github.user call :GetGitHubUser
 if errorlevel 1 (call :Red FAIL: could not determine GitHub user. & exit /b 6)
 if /I "%app.github.user%"=="%app.repo.owner%" (call :Green OK: Logged in user owns original repo; fork is not needed. & exit /b 0)
