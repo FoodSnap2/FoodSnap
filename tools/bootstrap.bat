@@ -23,6 +23,7 @@
 :: ============================================================
 cd /d "%~dp0"
 set "app.rc=0"
+set "app.version=bootstrap9"
 set "app.root=%CD%"
 set "app.timestamp="
 set "app.log.dir=%app.root%\bootstrap_logs"
@@ -62,10 +63,21 @@ if defined app.auto set "app.mode=auto"
 if defined app.help (call :ShowHelp & set "app.rc=0" & goto :end)
 call :ResolveBootstrapContext || (set "app.rc=%errorlevel%" & goto :end)
 call :ResolveRepoFolder || (set "app.rc=%errorlevel%" & goto :end)
-if /I "%app.mode%"=="auto" (call :RunAutoWorkflow || (set "app.rc=%errorlevel%" & goto :end) & set "app.rc=0" & goto :end)
-if /I "%app.mode%"=="menu" (call :ShowMenu || (set "app.rc=%errorlevel%" & goto :end) & set "app.rc=0" & goto :end)
+if defined app.auto goto :main_auto
+if /I "%app.mode%"=="auto" goto :main_auto
+if /I "%app.mode%"=="menu" goto :main_menu
 call :RunBootstrapWorkflow || (set "app.rc=%errorlevel%" & goto :end)
 set "app.rc=0"
+goto :end
+:main_auto
+call :Cyan MODE: auto [%app.version%]
+call :RunAutoWorkflow || (set "app.rc=%errorlevel%" & goto :end)
+set "app.rc=0"
+goto :end
+:main_menu
+call :ShowMenu || (set "app.rc=%errorlevel%" & goto :end)
+set "app.rc=0"
+goto :end
 :end
 exit /b %app.rc%
 
