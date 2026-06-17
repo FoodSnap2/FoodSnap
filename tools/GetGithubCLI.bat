@@ -1,7 +1,7 @@
 @echo off
 :setup
 :: ============================================================
-:: GetGitCLI.bat
+:: GetGithubCLI.bat
 :: Downloads and installs GitHub CLI, gh.exe, locally.
 ::
 :: Style:
@@ -78,10 +78,10 @@ exit /b 0
 :InitLog
 call :MakeTimestamp || exit /b 1
 if not exist "%app.logs%\" mkdir "%app.logs%" >nul 2>&1
-set "app.log=%app.logs%\GetGitCLI.%app.timestamp%.log"
+set "app.log=%app.logs%\GetGithubCLI.%app.timestamp%.log"
 break > "%app.log%"
 call :Cyan LOG: %app.log%
->>"%app.log%" echo GetGitCLI log
+>>"%app.log%" echo GetGithubCLI log
 >>"%app.log%" echo Timestamp: %app.timestamp%
 >>"%app.log%" echo Root: %app.root%
 >>"%app.log%" echo Install: %app.gh.install%
@@ -153,14 +153,14 @@ goto :ParseArgs
 ::   0 always
 :: ============================================================
 :ShowHelp
-call :Green GetGitCLI.bat
+call :Green GetGithubCLI.bat
 echo.
 call :Yellow Usage:
-echo   GetGitCLI.bat
-echo   GetGitCLI.bat force
-echo   GetGitCLI.bat root tools
-echo   GetGitCLI.bat url https://example/gh_windows_amd64.zip
-echo   GetGitCLI.bat help
+echo   GetGithubCLI.bat
+echo   GetGithubCLI.bat force
+echo   GetGithubCLI.bat root tools
+echo   GetGithubCLI.bat url https://example/gh_windows_amd64.zip
+echo   GetGithubCLI.bat help
 echo.
 call :Yellow Behavior:
 echo   Installs GitHub CLI ^(gh.exe^) into:
@@ -168,7 +168,7 @@ echo     %app.gh.install%
 echo   Ready file:
 echo     %app.gh.exe%
 echo   Logs:
-echo     %app.logs%\GetGitCLI.YYYY-MM-DD.HHhmm.ss.log
+echo     %app.logs%\GetGithubCLI.YYYY-MM-DD.HHhmm.ss.log
 echo.
 call :Yellow Latest release lookup:
 echo   API:   %app.gh.api%
@@ -236,7 +236,7 @@ exit /b 0
 :ResolveUrl
 if defined app.gh.url exit /b 0
 call :Yellow DO: resolving latest GitHub CLI URL.
-for /f "delims=" %%U in ('powershell -NoProfile -ExecutionPolicy Bypass -Command "$ProgressPreference='SilentlyContinue'; $h=@{'User-Agent'='FoodSnap-GetGitCLI'}; $r=Invoke-RestMethod -Headers $h -Uri '%app.gh.api%'; $a=$r.assets | Where-Object { $_.name -match '%app.gh.asset.regex%' } | Select-Object -First 1; if($null -eq $a){exit 1}; Write-Output $a.browser_download_url" 2^>^> "%app.log%"') do set "app.gh.url=%%U"
+for /f "delims=" %%U in ('powershell -NoProfile -ExecutionPolicy Bypass -Command "$ProgressPreference='SilentlyContinue'; $h=@{'User-Agent'='FoodSnap-GetGithubCLI'}; $r=Invoke-RestMethod -Headers $h -Uri '%app.gh.api%'; $a=$r.assets | Where-Object { $_.name -match '%app.gh.asset.regex%' } | Select-Object -First 1; if($null -eq $a){exit 1}; Write-Output $a.browser_download_url" 2^>^> "%app.log%"') do set "app.gh.url=%%U"
 if defined app.gh.url exit /b 0
 call :Red FAIL: could not resolve latest GitHub CLI URL.
 call :Yellow LOG: %app.log%

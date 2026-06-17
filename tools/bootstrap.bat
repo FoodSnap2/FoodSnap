@@ -25,7 +25,7 @@
 :: ============================================================
 cd /d "%~dp0"
 set "app.rc=0"
-set "app.version=bootstrap23"
+set "app.version=bootstrap24"
 set "app.root=%CD%"
 set "app.timestamp="
 set "app.log.dir=%app.root%\bootstrap_logs"
@@ -248,7 +248,7 @@ if defined app.bootstrap.url call :InferFromBootstrapUrl
 if defined app.repo.url call :InferFromRepoUrl
 if not defined app.repo.url (call :Red FAIL: could not infer repo URL from bootstrap URL. & call :Yellow URL: %app.bootstrap.url% & exit /b 3)
 if not defined app.getgit.url if defined app.raw.tools.url set "app.getgit.url=%app.raw.tools.url%/GetGit.bat"
-if not defined app.getgh.url if defined app.raw.tools.url set "app.getgh.url=%app.raw.tools.url%/GetGitCLI.bat"
+if not defined app.getgh.url if defined app.raw.tools.url set "app.getgh.url=%app.raw.tools.url%/GetGithubCLI.bat"
 if not defined app.getgit.url (call :Red FAIL: could not infer tools/GetGit.bat URL. & exit /b 3)
 call :Green OK: Repo: %app.repo.url%
 exit /b 0
@@ -276,7 +276,7 @@ exit /b 0
 :InferFromRepoUrl
 for /f "tokens=1,* delims==" %%A in ('powershell -NoProfile -ExecutionPolicy Bypass -Command "$u=${env:app.repo.url}; if(!$u){$u=$env:app_repo_url}; if(!$u){exit 0}; $u=$u -replace '^git@github.com:','https://github.com/'; $u=$u -replace '^git@([^:]+):','https://$1/'; $uri=[uri]$u; $hostn=$uri.Host.ToLowerInvariant(); $p=$uri.AbsolutePath.Trim('/') -split '/'; if($p.Length -ge 2){$owner=$p[0];$repo=$p[1] -replace '\.git$',''; 'repo.owner='+$owner; 'repo.name='+$repo; if($hostn -eq 'github.com'){'repo.github=1'; 'raw.tools.url=https://raw.githubusercontent.com/'+$owner+'/'+$repo+'/'+${env:app.repo.branch}+'/tools'}else{'repo.github=0'}}"') do call :SetAppValue "%%A" "%%B"
 if defined app.repo.github if "%app.repo.github%"=="1" if not defined app.getgit.url set "app.getgit.url=%app.raw.tools.url%/GetGit.bat"
-if defined app.repo.github if "%app.repo.github%"=="1" if not defined app.getgh.url set "app.getgh.url=%app.raw.tools.url%/GetGitCLI.bat"
+if defined app.repo.github if "%app.repo.github%"=="1" if not defined app.getgh.url set "app.getgh.url=%app.raw.tools.url%/GetGithubCLI.bat"
 exit /b 0
 
 :: ============================================================
@@ -635,7 +635,7 @@ exit /b 0
 :: ============================================================
 :: Function: EnsureGitHubCLI
 :: Usage: call :EnsureGitHubCLI
-:: Purpose: finds or installs gh.exe using tools\GetGitCLI.bat from the repo.
+:: Purpose: finds or installs gh.exe using tools\GetGithubCLI.bat from the repo.
 :: Returns:
 ::   0 gh ready
 ::   6 gh install failed
@@ -646,18 +646,18 @@ call :AddGitToPath
 call :FindGitHubCliExe
 if defined app.gh if exist "%app.gh%" (call :Green OK: Found GitHub CLI: %app.gh% & exit /b 0)
 set "app.gh="
-if not exist "%app.folder%\tools\GetGitCLI.bat" call :DownloadRepoGetGitCLI
-if not exist "%app.folder%\tools\GetGitCLI.bat" (call :Red FAIL: tools\GetGitCLI.bat was not found. & exit /b 6)
-call :Yellow DO: Installing GitHub CLI using tools\GetGitCLI.bat.
+if not exist "%app.folder%\tools\GetGithubCLI.bat" call :DownloadRepoGetGithubCLI
+if not exist "%app.folder%\tools\GetGithubCLI.bat" (call :Red FAIL: tools\GetGithubCLI.bat was not found. & exit /b 6)
+call :Yellow DO: Installing GitHub CLI using tools\GetGithubCLI.bat.
 pushd "%app.folder%" >nul
-cmd.exe /D /C call "tools\GetGitCLI.bat" >> "%app.log%" 2>&1
+cmd.exe /D /C call "tools\GetGithubCLI.bat" >> "%app.log%" 2>&1
 set "egc_rc=%errorlevel%"
 popd >nul 2>&1
 cd /d "%app.root%" >nul 2>&1
-if not "%egc_rc%"=="0" (call :Red FAIL: GetGitCLI.bat failed. & call :Yellow LOG: %app.log% & set "egc_rc=" & exit /b 6)
+if not "%egc_rc%"=="0" (call :Red FAIL: GetGithubCLI.bat failed. & call :Yellow LOG: %app.log% & set "egc_rc=" & exit /b 6)
 set "egc_rc="
 call :FindGitHubCliExe
-if not defined app.gh (call :Red FAIL: gh.exe is still missing after GetGitCLI.bat. & call :Yellow LOG: %app.log% & exit /b 6)
+if not defined app.gh (call :Red FAIL: gh.exe is still missing after GetGithubCLI.bat. & call :Yellow LOG: %app.log% & exit /b 6)
 if not exist "%app.gh%" (call :Red FAIL: gh.exe path is invalid: %app.gh% & set "app.gh=" & call :Yellow LOG: %app.log% & exit /b 6)
 call :Green OK: GitHub CLI ready: %app.gh%
 exit /b 0
@@ -708,22 +708,22 @@ set "agctp_dir="
 exit /b 0
 
 :: ============================================================
-:: Function: DownloadRepoGetGitCLI
-:: Usage: call :DownloadRepoGetGitCLI
-:: Purpose: downloads GetGitCLI.bat into the cloned repo if missing.
+:: Function: DownloadRepoGetGithubCLI
+:: Usage: call :DownloadRepoGetGithubCLI
+:: Purpose: downloads GetGithubCLI.bat into the cloned repo if missing.
 :: Returns:
 ::   0 always
 
 :: ============================================================
-:DownloadRepoGetGitCLI
+:DownloadRepoGetGithubCLI
 if not defined app.getgh.url exit /b 0
 if not exist "%app.folder%\tools\" mkdir "%app.folder%\tools" >nul 2>&1
 call :Yellow GET: %app.getgh.url%
-if exist "%app.folder%\tools\GetGitCLI.bat" del /Q "%app.folder%\tools\GetGitCLI.bat" >nul 2>&1
+if exist "%app.folder%\tools\GetGithubCLI.bat" del /Q "%app.folder%\tools\GetGithubCLI.bat" >nul 2>&1
 where curl.exe >nul 2>nul
-if not errorlevel 1 curl.exe -L --fail --retry 3 -o "%app.folder%\tools\GetGitCLI.bat" "%app.getgh.url%" >> "%app.log%" 2>&1
-if exist "%app.folder%\tools\GetGitCLI.bat" exit /b 0
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$ProgressPreference='SilentlyContinue'; Invoke-WebRequest -Uri '%app.getgh.url%' -OutFile '%app.folder%\tools\GetGitCLI.bat'" >> "%app.log%" 2>&1
+if not errorlevel 1 curl.exe -L --fail --retry 3 -o "%app.folder%\tools\GetGithubCLI.bat" "%app.getgh.url%" >> "%app.log%" 2>&1
+if exist "%app.folder%\tools\GetGithubCLI.bat" exit /b 0
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$ProgressPreference='SilentlyContinue'; Invoke-WebRequest -Uri '%app.getgh.url%' -OutFile '%app.folder%\tools\GetGithubCLI.bat'" >> "%app.log%" 2>&1
 exit /b 0
 
 :: ============================================================
